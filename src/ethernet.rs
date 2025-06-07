@@ -1,8 +1,12 @@
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
+    ops::{Deref, DerefMut},
+    sync::{Arc, Mutex, mpsc::Sender},
+    thread,
 };
 
+use pnet::datalink::{self, Channel::Ethernet, DataLinkSender};
 use thiserror::Error;
 
 use crate::types::{HexStringExt, MacAddr};
@@ -103,6 +107,105 @@ impl TryFrom<&[u8]> for EthernetFrame {
             src_mac,
             ether_type,
             payload,
+        })
+    }
+}
+
+struct DataLinkSenderWrapper(Box<dyn DataLinkSender>);
+
+impl Debug for DataLinkSenderWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Box<dyn DataLinkSender>")
+    }
+}
+
+impl Deref for DataLinkSenderWrapper {
+    type Target = Box<dyn DataLinkSender>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for DataLinkSenderWrapper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct EthernetLayer {
+    sender: DataLinkSenderWrapper,
+    observers: Arc<Mutex<Vec<Sender<Arc<EthernetFrame>>>>>,
+}
+
+impl EthernetLayer {
+    pub fn start(interface_name: impl Into<String>) -> Self {
+        let interface_name = interface_name.into();
+        let interfaces = datalink::interfaces();
+        let interface = interfaces
+            .into_iter()
+            .filter(|iface| iface.name == interface_name)
+            .next()
+            .expect(&format!("interface name `{}` not found", interface_name));
+
+        let (tx, mut _rx) = match datalink::channel(&interface, Default::default()) {
+            Ok(Ethernet(tx, rx)) => (tx, rx),
+            Ok(_) => panic!("Unhandled channel type"),
+            Err(e) => panic!(
+                "An error occurred when creating the datalink channel: {}",
+                e
+            ),
+        };
+
+        let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<EthernetFrame>>>::new()));
+        let cloned_observers = Arc::clone(&observers);
+        thread::Builder::new()
+            .name("ethernet_tx".into())
+            .spawn(move || {
+                loop {
+                    if let Ok(raw) = _rx.next() {
+                        let frame = match EthernetFrame::try_from(raw) {
+                            Ok(frame) => frame,
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                continue;
+                            }
+                        };
+                        let frame = Arc::new(frame);
+                        match cloned_observers.lock() {
+                            Ok(mut guard) => {
+                                guard.retain(|sender| sender.send(Arc::clone(&frame)).is_ok());
+                            }
+                            Err(e) => {
+                                let mut observers = e.into_inner();
+                                observers.clear();
+                                cloned_observers.clear_poison();
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
+        Self {
+            sender: DataLinkSenderWrapper(tx),
+            observers,
+        }
+    }
+
+    pub fn add_observer(&mut self, observer: Sender<Arc<EthernetFrame>>) {
+        let mut guard = self.observers.lock().unwrap_or_else(|e| e.into_inner());
+        guard.push(observer);
+        self.observers.clear_poison();
+    }
+
+    pub fn send(&mut self, packet: &[u8]) -> Result<(), std::io::Error> {
+        self.sender.send_to(packet, None).unwrap_or_else(|| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No tx target",
+            ))
         })
     }
 }
