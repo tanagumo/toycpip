@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use pnet::datalink::{self, Channel::Ethernet, DataLinkSender};
+use pnet::datalink::{self, Channel::Ethernet, DataLinkSender, NetworkInterface};
 use thiserror::Error;
 
 use crate::types::{HexStringExt, MacAddr};
@@ -140,16 +140,8 @@ pub struct EthernetLayer {
 }
 
 impl EthernetLayer {
-    pub fn start(interface_name: impl Into<String>) -> Self {
-        let interface_name = interface_name.into();
-        let interfaces = datalink::interfaces();
-        let interface = interfaces
-            .into_iter()
-            .filter(|iface| iface.name == interface_name)
-            .next()
-            .expect(&format!("interface name `{}` not found", interface_name));
-
-        let (tx, mut _rx) = match datalink::channel(&interface, Default::default()) {
+    pub fn start(interface: &NetworkInterface) -> Self {
+        let (tx, mut _rx) = match datalink::channel(interface, Default::default()) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
             Ok(_) => panic!("Unhandled channel type"),
             Err(e) => panic!(
