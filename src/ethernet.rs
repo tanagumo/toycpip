@@ -261,12 +261,14 @@ impl EthernetLayer {
         self.observers.clear_poison();
     }
 
-    pub fn send(&mut self, packet: &[u8]) -> Result<(), std::io::Error> {
-        self.sender.send_to(packet, None).unwrap_or_else(|| {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No tx target",
-            ))
-        })
+    pub fn send(&mut self, packet: &EthernetFrame) -> Result<(), std::io::Error> {
+        self.sender
+            .send_to(&packet.to_bytes(), None)
+            .unwrap_or_else(|| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "No tx target",
+                ))
+            })
     }
 }
