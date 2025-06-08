@@ -23,6 +23,10 @@ impl HexStringExt for [u8] {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct MacAddr([u8; 6]);
 
+impl MacAddr {
+    pub const BYTES: u8 = 6;
+}
+
 impl Display for MacAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", to_hex_string(&self.0))
