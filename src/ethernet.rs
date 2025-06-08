@@ -56,6 +56,18 @@ impl From<u16> for EtherType {
     }
 }
 
+impl Into<[u8; 2]> for EtherType {
+    fn into(self) -> [u8; 2] {
+        let value = match self {
+            EtherType::Arp => 0x0806,
+            EtherType::IpV4 => 0x0800,
+            EtherType::Other(v) => v,
+        };
+
+        value.to_be_bytes()
+    }
+}
+
 impl Display for EtherType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
