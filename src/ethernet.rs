@@ -11,13 +11,32 @@ use thiserror::Error;
 
 use crate::types::{HexStringExt, MacAddr};
 
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum EthernetFrameField {
+    DstMacAddr,
+    SrcMacAddr,
+    EtherType,
+}
+
+impl Display for EthernetFrameField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let field = match self {
+            EthernetFrameField::DstMacAddr => "DstMacAddr",
+            EthernetFrameField::SrcMacAddr => "SrcMacAddr",
+            EthernetFrameField::EtherType => "EtherType",
+        };
+        write!(f, "{}", field)
+    }
+}
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum EthernetFrameError {
     #[error("ethernet frame too short: {0} bytes")]
     TooShort(usize),
-    #[error("malformed ethernet frame: {0}")]
-    Malformed(Cow<'static, str>),
+    #[error("malformed ethernet frame field: {0}: {1}")]
+    MalformedField(EthernetFrameField, Cow<'static, str>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -78,25 +97,28 @@ impl TryFrom<&[u8]> for EthernetFrame {
 
         let dst_mac = TryInto::<[u8; 6]>::try_into(&value[..6])
             .map_err(|_| {
-                EthernetFrameError::Malformed(Cow::Borrowed(
-                    "Failed to extract `dst_mac` from the raw data",
-                ))
+                EthernetFrameError::MalformedField(
+                    EthernetFrameField::DstMacAddr,
+                    Cow::Borrowed("Failed to extract `dst_mac` from the raw data"),
+                )
             })?
             .into();
 
         let src_mac = TryInto::<[u8; 6]>::try_into(&value[6..12])
             .map_err(|_| {
-                EthernetFrameError::Malformed(Cow::Borrowed(
-                    "Failed to extract `src_mac` from the raw data",
-                ))
+                EthernetFrameError::MalformedField(
+                    EthernetFrameField::SrcMacAddr,
+                    Cow::Borrowed("Failed to extract `src_mac` from the raw data"),
+                )
             })?
             .into();
 
         let ether_type = EtherType::from(u16::from_be_bytes(
             TryInto::<[u8; 2]>::try_into(&value[12..14]).map_err(|_| {
-                EthernetFrameError::Malformed(Cow::Borrowed(
-                    "Failed to extract `ether_type` from the raw data",
-                ))
+                EthernetFrameError::MalformedField(
+                    EthernetFrameField::EtherType,
+                    Cow::Borrowed("Failed to extract `ether_type` from the raw data"),
+                )
             })?,
         ));
 
