@@ -133,6 +133,24 @@ impl TryFrom<&[u8]> for EthernetFrame {
     }
 }
 
+impl EthernetFrame {
+    pub fn dst_mac(&self) -> MacAddr {
+        self.dst_mac
+    }
+
+    pub fn src_mac(&self) -> MacAddr {
+        self.src_mac
+    }
+
+    pub fn ether_type(&self) -> EtherType {
+        self.ether_type
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+}
+
 struct DataLinkSenderWrapper(Box<dyn DataLinkSender>);
 
 impl Debug for DataLinkSenderWrapper {
