@@ -79,6 +79,10 @@ impl Display for EtherType {
     }
 }
 
+impl EtherType {
+    pub const BYTES: u8 = 2;
+}
+
 #[derive(Debug)]
 pub struct EthernetFrame {
     dst_mac: MacAddr,
