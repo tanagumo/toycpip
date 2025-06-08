@@ -169,6 +169,15 @@ impl EthernetFrame {
     pub fn len(&self) -> usize {
         MacAddr::BYTES as usize * 2 + EtherType::BYTES as usize + self.payload.len()
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.len());
+        bytes.extend(&*self.dst_mac);
+        bytes.extend(&*self.src_mac);
+        bytes.extend(Into::<[u8; 2]>::into(self.ether_type));
+        bytes.extend(&self.payload);
+        bytes
+    }
 }
 
 struct DataLinkSenderWrapper(Box<dyn DataLinkSender>);
