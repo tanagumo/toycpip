@@ -165,6 +165,10 @@ impl EthernetFrame {
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
+
+    pub fn len(&self) -> usize {
+        MacAddr::BYTES as usize * 2 + EtherType::BYTES as usize + self.payload.len()
+    }
 }
 
 struct DataLinkSenderWrapper(Box<dyn DataLinkSender>);
