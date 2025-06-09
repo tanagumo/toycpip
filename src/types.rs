@@ -25,6 +25,10 @@ pub struct MacAddr([u8; 6]);
 
 impl MacAddr {
     pub const BYTES: u8 = 6;
+
+    pub fn new(value: [u8; 6]) -> Self {
+        Self(value)
+    }
 }
 
 impl Display for MacAddr {
