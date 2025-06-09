@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     fmt::{Debug, Display},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         mpsc::{self, SendError, Sender},
     },
     thread,
@@ -12,6 +12,8 @@ use pnet::datalink::{self, Channel::Ethernet, NetworkInterface};
 use thiserror::Error;
 
 use crate::types::{HexStringExt, MacAddr};
+
+pub(crate) static ETHERNET_LAYER: OnceLock<EthernetLayer> = OnceLock::new();
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -275,4 +277,8 @@ impl EthernetLayer {
     pub fn send(&self, packet: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
         self.sender.send(packet)
     }
+}
+
+pub fn init(interface: &NetworkInterface) {
+    ETHERNET_LAYER.get_or_init(|| EthernetLayer::start(interface));
 }
