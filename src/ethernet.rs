@@ -152,6 +152,20 @@ impl TryFrom<&[u8]> for EthernetFrame {
 }
 
 impl EthernetFrame {
+    pub fn new(
+        dst_mac: MacAddr,
+        src_mac: MacAddr,
+        ether_type: EtherType,
+        payload: Vec<u8>,
+    ) -> Self {
+        Self {
+            dst_mac,
+            src_mac,
+            ether_type,
+            payload,
+        }
+    }
+
     pub fn dst_mac(&self) -> MacAddr {
         self.dst_mac
     }
