@@ -252,13 +252,13 @@ impl EthernetLayer {
         }
     }
 
-    pub fn add_observer(&mut self, observer: Sender<Arc<EthernetFrame>>) {
+    pub fn add_observer(&self, observer: Sender<Arc<EthernetFrame>>) {
         let mut guard = self.observers.lock().unwrap_or_else(|e| e.into_inner());
         guard.push(observer);
         self.observers.clear_poison();
     }
 
-    pub fn send(&mut self, packet: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
+    pub fn send(&self, packet: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
         self.sender.send(packet)
     }
 }
