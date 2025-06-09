@@ -29,6 +29,10 @@ impl MacAddr {
     pub fn new(value: [u8; 6]) -> Self {
         Self(value)
     }
+
+    pub fn octets(&self) -> [u8; 6] {
+        self.0
+    }
 }
 
 impl Display for MacAddr {
