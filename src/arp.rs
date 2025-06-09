@@ -119,10 +119,10 @@ impl ArpPacket {
     }
 }
 
-impl TryFrom<EthernetFrame> for ArpPacket {
+impl TryFrom<&EthernetFrame> for ArpPacket {
     type Error = ArpPacketError;
 
-    fn try_from(value: EthernetFrame) -> Result<Self, Self::Error> {
+    fn try_from(value: &EthernetFrame) -> Result<Self, Self::Error> {
         if value.ether_type() != EtherType::Arp {
             return Err(ArpPacketError::Malformed(Cow::Borrowed(
                 "this ethernet frame is not arp packet",
