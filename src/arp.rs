@@ -1,9 +1,12 @@
 use std::borrow::Cow;
+use std::sync::mpsc::{self, SendError};
+use std::time::{Duration, Instant};
 use std::{fmt::Display, net::Ipv4Addr};
 
 use thiserror::Error;
 
-use crate::ethernet::{EtherType, EthernetFrame};
+use crate::ethernet::{ETHERNET_LAYER, EtherType, EthernetFrame};
+use crate::host::{HOST_IP, HOST_MAC};
 use crate::types::MacAddr;
 
 #[derive(Debug)]
@@ -46,7 +49,7 @@ pub enum ArpPacketError {
     Malformed(Cow<'static, str>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum OpCode {
     Request,
     Response,
@@ -57,6 +60,15 @@ impl Display for OpCode {
         match self {
             OpCode::Request => write!(f, "request"),
             OpCode::Response => write!(f, "response"),
+        }
+    }
+}
+
+impl From<OpCode> for u16 {
+    fn from(value: OpCode) -> Self {
+        match value {
+            OpCode::Request => 0x0001,
+            OpCode::Response => 0x0002,
         }
     }
 }
@@ -90,32 +102,56 @@ pub struct ArpPacket {
 }
 
 impl ArpPacket {
+    pub const BYTES: u8 = 28;
+
     fn hardware_type(&self) -> u16 {
         self.hardware_type
     }
+
     fn protocol_type(&self) -> u16 {
         self.protocol_type
     }
+
     fn hardware_size(&self) -> u8 {
         self.hardware_size
     }
+
     fn protocol_size(&self) -> u8 {
         self.protocol_size
     }
+
     fn op_code(&self) -> &OpCode {
         &self.op_code
     }
+
     fn sender_mac(&self) -> &MacAddr {
         &self.sender_mac
     }
+
     fn sender_ip(&self) -> &Ipv4Addr {
         &self.sender_ip
     }
+
     fn target_mac(&self) -> &MacAddr {
         &self.target_mac
     }
+
     fn target_ip(&self) -> &Ipv4Addr {
         &self.target_ip
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut ret = Vec::with_capacity(Self::BYTES as usize);
+        ret.extend(u16::to_be_bytes(self.hardware_type));
+        ret.extend(u16::to_be_bytes(self.protocol_type));
+        ret.extend([self.hardware_size]);
+        ret.extend([self.protocol_size]);
+        ret.extend(u16::from(self.op_code).to_be_bytes());
+        ret.extend(self.sender_mac.octets());
+        ret.extend(self.sender_ip.octets());
+        ret.extend(self.target_mac.octets());
+        ret.extend(self.target_ip.octets());
+        ret
     }
 }
 
@@ -256,4 +292,65 @@ impl TryFrom<&EthernetFrame> for ArpPacket {
             target_ip,
         })
     }
+}
+
+#[derive(Debug, Error)]
+pub enum ArpRequestError {
+    #[error("timeout: {0} seconds")]
+    Timeout(u8),
+    #[error("send error: {0}")]
+    SendError(#[from] SendError<EthernetFrame>),
+}
+
+pub fn arp_request(target_ip: Ipv4Addr, timeout: Option<u8>) -> Result<MacAddr, ArpRequestError> {
+    let host_mac = *HOST_MAC.get().unwrap();
+    let host_ip = *HOST_IP.get().unwrap();
+
+    let packet = ArpPacket {
+        hardware_type: 0x0001,
+        protocol_type: 0x0800,
+        hardware_size: 0x06,
+        protocol_size: 0x04,
+        op_code: OpCode::Request,
+        sender_mac: host_mac,
+        sender_ip: host_ip,
+        target_mac: MacAddr::new([0x00; 6]),
+        target_ip,
+    };
+
+    let frame = EthernetFrame::new(
+        MacAddr::new([0xff; 6]),
+        host_mac,
+        EtherType::Arp,
+        packet.to_bytes(),
+    );
+
+    let (tx, rx) = mpsc::channel();
+
+    let layer = ETHERNET_LAYER.get().unwrap();
+    layer.add_observer(tx);
+    layer.send(frame)?;
+
+    let start = Instant::now();
+    let result = loop {
+        if let Some(secs) = timeout {
+            if start.elapsed() > Duration::from_secs(secs as u64) {
+                break Err(ArpRequestError::Timeout(secs));
+            }
+        }
+
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(frame) => {
+                if let Ok(packet) = TryInto::<ArpPacket>::try_into(&*frame) {
+                    if packet.op_code() == &OpCode::Response && packet.sender_ip == target_ip {
+                        return Ok(packet.sender_mac);
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => continue,
+        }
+    };
+
+    result
 }
