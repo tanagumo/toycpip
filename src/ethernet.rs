@@ -231,16 +231,8 @@ impl EthernetLayer {
                             }
                         };
                         let frame = Arc::new(frame);
-                        match cloned_observers.lock() {
-                            Ok(mut guard) => {
-                                guard.retain(|sender| sender.send(Arc::clone(&frame)).is_ok());
-                            }
-                            Err(e) => {
-                                let mut observers = e.into_inner();
-                                observers.clear();
-                                cloned_observers.clear_poison();
-                            }
-                        }
+                        let mut guard = cloned_observers.lock().unwrap();
+                        guard.retain(|sender| sender.send(Arc::clone(&frame)).is_ok());
                     }
                 }
             })
@@ -269,9 +261,8 @@ impl EthernetLayer {
     }
 
     pub fn add_observer(&self, observer: Sender<Arc<EthernetFrame>>) {
-        let mut guard = self.observers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.observers.lock().unwrap();
         guard.push(observer);
-        self.observers.clear_poison();
     }
 
     pub fn send(&self, packet: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
