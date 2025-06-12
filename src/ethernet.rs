@@ -265,8 +265,8 @@ impl EthernetLayer {
         guard.push(observer);
     }
 
-    pub fn send(&self, packet: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
-        self.sender.send(packet)
+    pub fn send(&self, frame: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
+        self.sender.send(frame)
     }
 }
 
