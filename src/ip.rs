@@ -1,4 +1,7 @@
 use std::borrow::Cow;
+use std::sync::mpsc::{self, Receiver, SendError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::{fmt::Display, net::Ipv4Addr};
 
 use thiserror::Error;
@@ -222,5 +225,70 @@ impl TryFrom<&EthernetFrame> for IpPacket {
             padding,
             payload,
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct IpLayer {
+    sender: Sender<IpPacket>,
+    observers: Arc<Mutex<Vec<Sender<Arc<IpPacket>>>>>,
+}
+
+impl IpLayer {
+    pub fn start(
+        ethernet_sender: impl Fn(IpPacket) -> Result<(), SendError<EthernetFrame>> + Send + 'static,
+        receiver: Receiver<Arc<EthernetFrame>>,
+    ) -> Self {
+        let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<IpPacket>>>::new()));
+        let cloned_observers = Arc::clone(&observers);
+
+        thread::Builder::new()
+            .name("ip_observe_tx".into())
+            .spawn(move || {
+                loop {
+                    if let Ok(frame) = receiver.recv() {
+                        let packet = match IpPacket::try_from(&*frame) {
+                            Ok(packet) => packet,
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                continue;
+                            }
+                        };
+                        let packet = Arc::new(packet);
+                        let mut guard = cloned_observers.lock().unwrap();
+                        guard.retain(|sender| sender.send(Arc::clone(&packet)).is_ok());
+                    }
+                }
+            })
+            .unwrap();
+
+        let (tx, rx) = mpsc::channel::<IpPacket>();
+        thread::Builder::new()
+            .name("ip_send_tx".into())
+            .spawn(move || {
+                for packet in rx {
+                    match ethernet_sender(packet) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("{}", e);
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
+        Self {
+            sender: tx,
+            observers,
+        }
+    }
+
+    pub fn add_observer(&self, observer: Sender<Arc<IpPacket>>) {
+        let mut guard = self.observers.lock().unwrap();
+        guard.push(observer);
+    }
+
+    pub fn send(&self, packet: IpPacket) -> Result<(), SendError<IpPacket>> {
+        self.sender.send(packet)
     }
 }
