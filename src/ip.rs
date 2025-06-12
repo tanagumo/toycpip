@@ -152,7 +152,7 @@ impl TryFrom<&EthernetFrame> for IpPacket {
         };
 
         let flags = payload[6] >> 5;
-        let fragment_offset = ((payload[6] & 0b00011111) << 8) as u16 | payload[7] as u16;
+        let fragment_offset = (((payload[6] & 0b00011111) as u16) << 8) | payload[7] as u16;
         let flags_and_fragment_offset = (flags as u16) << 13 | fragment_offset;
         let ttl = payload[8];
         let protocol = payload[9];
