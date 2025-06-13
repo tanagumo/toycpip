@@ -4,3 +4,4 @@ mod ethernet;
 mod host;
 mod ip;
 mod types;
+mod utils;
