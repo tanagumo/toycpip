@@ -17,10 +17,6 @@ pub enum ArpPacketField {
     HardwareSize,
     ProtocolSize,
     OpCode,
-    SenderMac,
-    SenderIp,
-    TargetMac,
-    TargetIp,
 }
 
 impl Display for ArpPacketField {
@@ -31,10 +27,6 @@ impl Display for ArpPacketField {
             ArpPacketField::HardwareSize => "HardwareSize",
             ArpPacketField::ProtocolSize => "ProtocolSize",
             ArpPacketField::OpCode => "OpCode",
-            ArpPacketField::SenderMac => "SenderMac",
-            ArpPacketField::SenderIp => "SenderIp",
-            ArpPacketField::TargetMac => "TargetMac",
-            ArpPacketField::TargetIp => "TargetIp",
         };
         write!(f, "{}", field)
     }
@@ -85,6 +77,14 @@ impl TryFrom<u16> for OpCode {
                 Cow::Owned(format!("0x{:04x}", value)),
             )),
         }
+    }
+}
+
+impl TryFrom<[u8; 2]> for OpCode {
+    type Error = ArpPacketError;
+
+    fn try_from(value: [u8; 2]) -> Result<Self, Self::Error> {
+        Self::try_from(u16::from_be_bytes(value))
     }
 }
 
@@ -174,13 +174,7 @@ impl TryFrom<&EthernetFrame> for ArpPacket {
         }
 
         let hardware_type = {
-            let bytes = TryInto::<[u8; 2]>::try_into(&payload[..2]).map_err(|_| {
-                ArpPacketError::MalformedField(
-                    ArpPacketField::HardwareType,
-                    Cow::Borrowed("invalid hardware_type"),
-                )
-            })?;
-            let val = u16::from_be_bytes(bytes);
+            let val = u16::from_be_bytes([payload[0], payload[1]]);
             if val != 0x0001 {
                 return Err(ArpPacketError::MalformedField(
                     ArpPacketField::HardwareType,
@@ -194,13 +188,7 @@ impl TryFrom<&EthernetFrame> for ArpPacket {
         };
 
         let protocol_type = {
-            let bytes = TryInto::<[u8; 2]>::try_into(&payload[2..4]).map_err(|_| {
-                ArpPacketError::MalformedField(
-                    ArpPacketField::ProtocolType,
-                    Cow::Borrowed("invalid protocol_type"),
-                )
-            })?;
-            let val = u16::from_be_bytes(bytes);
+            let val = u16::from_be_bytes([payload[2], payload[3]]);
             if val != 0x0800 {
                 return Err(ArpPacketError::MalformedField(
                     ArpPacketField::ProtocolType,
@@ -239,46 +227,29 @@ impl TryFrom<&EthernetFrame> for ArpPacket {
             }
         };
 
-        let op_code = TryInto::<[u8; 2]>::try_into(&payload[6..8])
-            .map_err(|_| {
-                ArpPacketError::MalformedField(
-                    ArpPacketField::OpCode,
-                    Cow::Borrowed("failed to extract op_code for arp"),
-                )
-            })
-            .and_then(|array| OpCode::try_from(u16::from_be_bytes(array)))?;
+        let op_code = OpCode::try_from([payload[6], payload[7]])?;
 
-        let sender_mac =
-            MacAddr::from(TryInto::<[u8; 6]>::try_into(&payload[8..14]).map_err(|_| {
-                ArpPacketError::MalformedField(
-                    ArpPacketField::SenderMac,
-                    Cow::Borrowed("failed to extract sender_mac for arp"),
-                )
-            })?);
+        let sender_mac = MacAddr::from([
+            payload[8],
+            payload[9],
+            payload[10],
+            payload[11],
+            payload[12],
+            payload[13],
+        ]);
 
-        let sender_ip =
-            Ipv4Addr::from(TryInto::<[u8; 4]>::try_into(&payload[14..18]).map_err(|_| {
-                ArpPacketError::MalformedField(
-                    ArpPacketField::SenderIp,
-                    Cow::Borrowed("failed to extract sender_ip for arp"),
-                )
-            })?);
+        let sender_ip = Ipv4Addr::from([payload[14], payload[15], payload[16], payload[17]]);
 
-        let target_mac =
-            MacAddr::from(TryInto::<[u8; 6]>::try_into(&payload[18..24]).map_err(|_| {
-                ArpPacketError::MalformedField(
-                    ArpPacketField::TargetMac,
-                    Cow::Borrowed("failed to extract target_mac for arp"),
-                )
-            })?);
+        let target_mac = MacAddr::from([
+            payload[18],
+            payload[19],
+            payload[20],
+            payload[21],
+            payload[22],
+            payload[23],
+        ]);
 
-        let target_ip =
-            Ipv4Addr::from(TryInto::<[u8; 4]>::try_into(&payload[24..28]).map_err(|_| {
-                ArpPacketError::MalformedField(
-                    ArpPacketField::TargetIp,
-                    Cow::Borrowed("failed to extract target_ip for arp"),
-                )
-            })?);
+        let target_ip = Ipv4Addr::from([payload[24], payload[25], payload[26], payload[27]]);
 
         Ok(Self {
             hardware_type,
