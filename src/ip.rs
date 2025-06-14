@@ -64,33 +64,187 @@ impl From<u8> for Protocol {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Version(u8);
+
+impl Version {
+    fn new(value: u8) -> Self {
+        Self(value >> 4)
+    }
+
+    fn as_u8(&self) -> u8 {
+        self.0
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Ihl(u8);
+
+impl Ihl {
+    /// Ihl instances are only created from IpPacket with the assumption that
+    /// constraint violations for Ihl, specifically cases where the value is less than 5,
+    /// are considered program bugs and will cause a panic
+    fn new(value: u8) -> Self {
+        let _value = value & 0b00001111;
+        if _value < 5 {
+            panic!(
+                "the value of ihl must be greater than or equal to 0x05, but got 0x{:02x}",
+                value
+            );
+        }
+        Self(_value)
+    }
+
+    fn as_u8(&self) -> u8 {
+        self.0
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Flag(u8);
+
+impl Flag {
+    fn new(value: u8) -> Self {
+        Self(value >> 5)
+    }
+
+    fn as_u8(&self) -> u8 {
+        self.0
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct FragmentOffset(u16);
+
+impl FragmentOffset {
+    fn new(value: u16) -> Self {
+        Self(value & 0b00011111_11111111)
+    }
+
+    fn as_u16(&self) -> u16 {
+        self.0
+    }
+
+    fn as_array(&self) -> [u8; 2] {
+        self.0.to_be_bytes()
+    }
+}
+
 #[derive(Debug)]
 pub struct IpPacket {
-    version_and_ihl: u8,
+    version: Version,
+    ihl: Ihl,
     type_of_service: u8,
     total_length: u16,
     identification: u16,
-    flags_and_fragment_offset: u16,
+    flag: Flag,
+    fragment_offset: FragmentOffset,
     ttl: u8,
     protocol: Protocol,
     header_checksum: u16,
-    source_ip_addr: Ipv4Addr,
-    destination_ip_addr: Ipv4Addr,
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
     padding: Vec<u8>,
     payload: Vec<u8>,
 }
 
 impl IpPacket {
-    fn src_ip(&self) -> Ipv4Addr {
-        self.source_ip_addr
+    fn version(&self) -> Version {
+        self.version
     }
 
-    fn dst_ip(&self) -> Ipv4Addr {
-        self.destination_ip_addr
+    fn ihl(&self) -> Ihl {
+        self.ihl
+    }
+
+    fn type_of_service(&self) -> u8 {
+        self.type_of_service
+    }
+
+    fn total_length(&self) -> u16 {
+        self.total_length
+    }
+
+    fn identification(&self) -> u16 {
+        self.identification
+    }
+
+    fn flag(&self) -> Flag {
+        self.flag
+    }
+
+    fn fragment_offset(&self) -> FragmentOffset {
+        self.fragment_offset
+    }
+
+    fn ttl(&self) -> u8 {
+        self.ttl
     }
 
     fn protocol(&self) -> Protocol {
         self.protocol
+    }
+
+    fn header_checksum(&self) -> u16 {
+        self.header_checksum
+    }
+
+    fn src_ip(&self) -> Ipv4Addr {
+        self.src_ip
+    }
+
+    fn dst_ip(&self) -> Ipv4Addr {
+        self.dst_ip
+    }
+
+    fn padding(&self) -> &[u8] {
+        &self.padding
+    }
+
+    fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let capacity = 20 + self.padding.len() + self.payload.len();
+
+        let mut v = Vec::with_capacity(capacity);
+
+        let total_length_array = self.total_length.to_be_bytes();
+        let ident_array = self.identification.to_be_bytes();
+        let flag_and_offset_array = ((self.flag.as_u8() as u16) << 13
+            | self.fragment_offset.as_u16() & 0b00011111_11111111)
+            .to_be_bytes();
+        let header_checksum_array = self.header_checksum.to_be_bytes();
+        let src_ip_array = self.src_ip.to_bits().to_be_bytes();
+        let dst_ip_array = self.dst_ip.to_bits().to_be_bytes();
+
+        // Minimize the number of extend calls for performance optimization
+        v.extend([
+            self.version.as_u8() | self.ihl.as_u8(),
+            self.type_of_service,
+            total_length_array[0],
+            total_length_array[1],
+            ident_array[0],
+            ident_array[1],
+            flag_and_offset_array[0],
+            flag_and_offset_array[1],
+            self.ttl,
+            self.protocol.into(),
+            header_checksum_array[0],
+            header_checksum_array[1],
+            src_ip_array[0],
+            src_ip_array[1],
+            src_ip_array[2],
+            src_ip_array[3],
+            dst_ip_array[0],
+            dst_ip_array[1],
+            dst_ip_array[2],
+            dst_ip_array[3],
+        ]);
+        v.extend(self.padding());
+        v.extend(self.payload());
+        v
     }
 }
 
@@ -112,28 +266,30 @@ impl TryFrom<&EthernetFrame> for IpPacket {
             ))));
         }
 
-        let version_and_ihl = payload[0];
-        let ihl = version_and_ihl & 0b00001111;
-        if ihl < 5 {
-            return Err(IpPacketError::IhlTooSmall(ihl));
+        let version = Version::new(payload[0]);
+        let ihl_value = payload[0] & 0b00001111;
+        if ihl_value < 5 {
+            return Err(IpPacketError::IhlTooSmall(ihl_value));
         }
+        let ihl = Ihl::new(payload[0]);
         let type_of_service = payload[1];
-        let header_length = (ihl as usize) * 4;
+        let header_length = (ihl_value as usize) * 4;
 
         let total_length = u16::from_be_bytes([payload[2], payload[3]]);
         let identification = u16::from_be_bytes([payload[4], payload[5]]);
-        let flags = payload[6] >> 5;
-        let fragment_offset = (((payload[6] & 0b00011111) as u16) << 8) | payload[7] as u16;
-        let flags_and_fragment_offset = (flags as u16) << 13 | fragment_offset;
+
+        // flag and fragment_offset are in consecutive 2 bytes,
+        // where the first 3 bits are flag and the remaining 13 bits are fragment_offset
+        let flag = Flag::new(payload[6] >> 5);
+        let fragment_offset = FragmentOffset::new(u16::from_be_bytes([payload[6], payload[7]]));
+
         let ttl = payload[8];
-        let protocol = payload[9];
+        let protocol = Protocol::from(payload[9]);
 
         let header_checksum = u16::from_be_bytes([payload[10], payload[11]]);
 
-        let source_ip_addr = Ipv4Addr::from([payload[12], payload[13], payload[14], payload[15]]);
-
-        let destination_ip_addr =
-            Ipv4Addr::from([payload[16], payload[17], payload[18], payload[19]]);
+        let src_ip = Ipv4Addr::from([payload[12], payload[13], payload[14], payload[15]]);
+        let dst_ip = Ipv4Addr::from([payload[16], payload[17], payload[18], payload[19]]);
 
         let calculated_checksum = utils::calculate_checksum(&payload[..header_length]).unwrap();
 
@@ -145,16 +301,18 @@ impl TryFrom<&EthernetFrame> for IpPacket {
         }
 
         Ok(Self {
-            version_and_ihl,
+            version,
+            ihl,
             type_of_service,
             total_length,
             identification,
-            flags_and_fragment_offset,
+            flag,
+            fragment_offset,
             ttl,
-            protocol: Protocol::from(protocol),
+            protocol,
             header_checksum,
-            source_ip_addr,
-            destination_ip_addr,
+            src_ip,
+            dst_ip,
             padding: payload[20..header_length].to_vec(),
             payload: payload[header_length..].to_vec(),
         })
