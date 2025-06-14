@@ -24,7 +24,7 @@ impl HexStringExt for [u8] {
 pub struct MacAddr([u8; 6]);
 
 impl MacAddr {
-    pub const BYTES: u8 = 6;
+    pub const SIZE: usize = 6;
 
     pub fn new(value: [u8; 6]) -> Self {
         Self(value)

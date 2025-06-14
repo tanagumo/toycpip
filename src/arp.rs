@@ -102,7 +102,7 @@ pub struct ArpPacket {
 }
 
 impl ArpPacket {
-    pub const BYTES: u8 = 28;
+    pub const SIZE: usize = 28;
 
     fn hardware_type(&self) -> u16 {
         self.hardware_type
@@ -141,7 +141,7 @@ impl ArpPacket {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        let mut ret = Vec::with_capacity(Self::BYTES as usize);
+        let mut ret = Vec::with_capacity(Self::SIZE);
         ret.extend(u16::to_be_bytes(self.hardware_type));
         ret.extend(u16::to_be_bytes(self.protocol_type));
         ret.extend([self.hardware_size]);

@@ -70,7 +70,7 @@ impl Display for EtherType {
 }
 
 impl EtherType {
-    pub const BYTES: u8 = 2;
+    pub const SIZE: usize = 2;
 }
 
 #[derive(Debug)]
@@ -147,7 +147,7 @@ impl EthernetFrame {
     }
 
     pub fn len(&self) -> usize {
-        MacAddr::BYTES as usize * 2 + EtherType::BYTES as usize + self.payload.len()
+        MacAddr::SIZE * 2 + EtherType::SIZE + self.payload.len()
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
