@@ -1,9 +1,11 @@
 use std::borrow::Cow;
+use std::fmt::Display;
 use std::net::Ipv4Addr;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use log::{debug, error, info, warn};
 use thiserror::Error;
 
 use crate::ethernet::{EtherType, EthernetFrame};
@@ -26,6 +28,18 @@ pub enum Protocol {
     TCP,
     UDP,
     Other(u8),
+}
+
+impl Display for Protocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Protocol::ICMP => Cow::Borrowed("ICMP"),
+            Protocol::TCP => Cow::Borrowed("TCP"),
+            Protocol::UDP => Cow::Borrowed("UDP"),
+            Protocol::Other(n) => Cow::Owned(format!("Other({})", n)),
+        };
+        write!(f, "{}", value)
+    }
 }
 
 impl Into<u8> for Protocol {
@@ -64,6 +78,20 @@ pub struct IpPacket {
     destination_ip_addr: Ipv4Addr,
     padding: Vec<u8>,
     payload: Vec<u8>,
+}
+
+impl IpPacket {
+    fn src_ip(&self) -> Ipv4Addr {
+        self.source_ip_addr
+    }
+
+    fn dst_ip(&self) -> Ipv4Addr {
+        self.destination_ip_addr
+    }
+
+    fn protocol(&self) -> Protocol {
+        self.protocol
+    }
 }
 
 impl TryFrom<&EthernetFrame> for IpPacket {
@@ -144,18 +172,29 @@ impl IpLayer {
         ethernet_sender: impl Fn(IpPacket) -> Result<(), SendError<EthernetFrame>> + Send + 'static,
         receiver: Receiver<Arc<EthernetFrame>>,
     ) -> Self {
+        info!("Starting IP layer");
         let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<IpPacket>>>::new()));
         let cloned_observers = Arc::clone(&observers);
 
         thread::Builder::new()
             .name("ip_observe_tx".into())
             .spawn(move || {
+                debug!("IP receive thread started");
                 loop {
                     if let Ok(frame) = receiver.recv() {
+                        debug!("Processing Ethernet frame for IP packet extraction");
                         let packet = match IpPacket::try_from(&*frame) {
-                            Ok(packet) => packet,
+                            Ok(packet) => {
+                                debug!(
+                                    "IP packet parsed successfully: src={}, dst={}, protocol={}",
+                                    packet.src_ip(),
+                                    packet.dst_ip(),
+                                    packet.protocol()
+                                );
+                                packet
+                            }
                             Err(e) => {
-                                eprintln!("{}", e);
+                                warn!("Failed to parse IP packet: {}", e);
                                 continue;
                             }
                         };
@@ -171,11 +210,20 @@ impl IpLayer {
         thread::Builder::new()
             .name("ip_send_tx".into())
             .spawn(move || {
+                debug!("IP send thread started");
                 for packet in rx {
+                    debug!(
+                        "Sending IP packet: src={}, dst={}, protocol={}",
+                        packet.src_ip(),
+                        packet.dst_ip(),
+                        packet.protocol()
+                    );
                     match ethernet_sender(packet) {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            debug!("IP packet sent successfully");
+                        }
                         Err(e) => {
-                            eprintln!("{}", e);
+                            error!("Failed to send IP packet: {}", e);
                         }
                     }
                 }
@@ -191,6 +239,7 @@ impl IpLayer {
     pub fn add_observer(&self, observer: Sender<Arc<IpPacket>>) {
         let mut guard = self.observers.lock().unwrap();
         guard.push(observer);
+        debug!("Added IP observer: total_count={}", guard.len());
     }
 
     pub fn send(&self, packet: IpPacket) -> Result<(), SendError<IpPacket>> {

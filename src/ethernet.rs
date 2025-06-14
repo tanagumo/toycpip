@@ -8,6 +8,7 @@ use std::{
     thread,
 };
 
+use log::{debug, error, info, warn};
 use pnet::datalink::{self, Channel::Ethernet, NetworkInterface};
 use thiserror::Error;
 
@@ -176,24 +177,37 @@ impl EthernetLayer {
             ),
         };
 
+        info!("Starting Ethernet layer");
         let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<EthernetFrame>>>::new()));
         let cloned_observers = Arc::clone(&observers);
 
         thread::Builder::new()
             .name("ethernet_observe_tx".into())
             .spawn(move || {
+                debug!("Ethernet receive thread started");
                 loop {
                     if let Ok(raw) = _rx.next() {
                         let frame = match EthernetFrame::try_from(raw) {
-                            Ok(frame) => frame,
+                            Ok(frame) => {
+                                debug!("Ethernet frame parsed successfully: {}", frame);
+                                frame
+                            }
                             Err(e) => {
-                                eprintln!("{}", e);
+                                warn!("Failed to parse Ethernet frame: {}", e);
                                 continue;
                             }
                         };
                         let frame = Arc::new(frame);
                         let mut guard = cloned_observers.lock().unwrap();
+                        let observer_count = guard.len();
                         guard.retain(|sender| sender.send(Arc::clone(&frame)).is_ok());
+                        let retained_count = guard.len();
+                        if observer_count != retained_count {
+                            debug!(
+                                "Removed invalid observers: {} -> {}",
+                                observer_count, retained_count
+                            );
+                        }
                     }
                 }
             })
@@ -203,12 +217,20 @@ impl EthernetLayer {
         thread::Builder::new()
             .name("ethernet_send_tx".into())
             .spawn(move || {
+                debug!("Ethernet send thread started");
                 for frame in rx {
-                    if let Some(ret) = _tx.send_to(&frame.to_bytes(), None) {
+                    debug!("Sending Ethernet frame: {}", frame);
+                    let frame_bytes = frame.to_bytes();
+                    if let Some(ret) = _tx.send_to(&frame_bytes, None) {
                         match ret {
-                            Ok(_) => {}
+                            Ok(_) => {
+                                debug!(
+                                    "Ethernet frame sent successfully: {} bytes",
+                                    frame_bytes.len()
+                                );
+                            }
                             Err(e) => {
-                                eprintln!("{}", e);
+                                error!("Failed to send Ethernet frame: {}", e);
                             }
                         }
                     }
@@ -224,6 +246,7 @@ impl EthernetLayer {
     pub fn add_observer(&self, observer: Sender<Arc<EthernetFrame>>) {
         let mut guard = self.observers.lock().unwrap();
         guard.push(observer);
+        debug!("Added Ethernet observer: total_count={}", guard.len());
     }
 
     pub fn send(&self, frame: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
