@@ -97,7 +97,7 @@ impl TryFrom<&[u8]> for EthernetFrame {
     type Error = EthernetFrameError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() < 60 {
+        if value.len() < MacAddr::SIZE * 2 + EtherType::SIZE {
             return Err(EthernetFrameError::TooShort(value.len()));
         }
 
