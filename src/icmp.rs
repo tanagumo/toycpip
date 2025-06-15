@@ -168,9 +168,14 @@ impl TryFrom<&IpPacket> for IcmpPacket {
         };
 
         let checksum = u16::from_be_bytes([payload[2], payload[3]]);
-        if payload.len() % 2 != 0 {
-            payload.push(0);
-        }
+        let payload_is_odd = {
+            if payload.len() % 2 != 0 {
+                payload.push(0);
+                true
+            } else {
+                false
+            }
+        };
         let calculated_checksum = utils::calculate_checksum(&payload, Some(2)).unwrap();
         if checksum != calculated_checksum {
             return Err(IcmpPacketError::ChecksumMismatch(
@@ -179,7 +184,7 @@ impl TryFrom<&IpPacket> for IcmpPacket {
             ));
         }
 
-        if payload.len() % 2 != 0 {
+        if payload_is_odd {
             payload.pop();
         }
 
