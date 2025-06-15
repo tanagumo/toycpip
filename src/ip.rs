@@ -291,7 +291,8 @@ impl TryFrom<&EthernetFrame> for IpPacket {
         let src_ip = Ipv4Addr::from([payload[12], payload[13], payload[14], payload[15]]);
         let dst_ip = Ipv4Addr::from([payload[16], payload[17], payload[18], payload[19]]);
 
-        let calculated_checksum = utils::calculate_checksum(&payload[..header_length]).unwrap();
+        let calculated_checksum =
+            utils::calculate_checksum(&payload[..header_length], Some(10)).unwrap();
 
         if calculated_checksum != header_checksum {
             return Err(IpPacketError::ChecksumMismatch(
@@ -341,6 +342,11 @@ impl IpLayer {
                 loop {
                     if let Ok(frame) = receiver.recv() {
                         debug!("Processing Ethernet frame for IP packet extraction");
+
+                        if frame.ether_type() != EtherType::IpV4 {
+                            continue;
+                        }
+
                         let packet = match IpPacket::try_from(&*frame) {
                             Ok(packet) => {
                                 debug!(
