@@ -248,6 +248,19 @@ impl IpPacket {
     }
 }
 
+impl Display for IpPacket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "IPv{} {} -> {} ({})",
+            self.version.as_u8(),
+            self.src_ip,
+            self.dst_ip,
+            self.protocol,
+        )
+    }
+}
+
 impl TryFrom<&EthernetFrame> for IpPacket {
     type Error = IpPacketError;
 
