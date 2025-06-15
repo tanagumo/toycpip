@@ -1,8 +1,11 @@
-use std::{borrow::Cow, fmt::Display, process};
+use std::net::Ipv4Addr;
+use std::sync::mpsc::{self, SendError};
+use std::time::Duration;
+use std::{borrow::Cow, fmt::Display, process, time::Instant};
 
 use thiserror::Error;
 
-use crate::ip::IpPacket;
+use crate::ip::{self, IP_LAYER, IpPacket, IpPacketError, Protocol};
 use crate::utils;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -259,4 +262,62 @@ pub(crate) fn make_icmp_request(sequence: u16) -> IcmpPacket {
         sequence,
         vec![],
     )
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum IcmpRequestError {
+    #[error("timeout: {0} seconds")]
+    Timeout(u8),
+    #[error("send error: {0}")]
+    SendError(#[from] SendError<IpPacket>),
+    #[error("ip packet error: {0}")]
+    IpPacket(#[from] IpPacketError),
+}
+
+pub(crate) fn send_icmp_echo_request(
+    dst_ip: impl Into<Ipv4Addr>,
+    sequence: u16,
+    ttl: Option<u8>,
+    timeout: Option<u8>,
+) -> Result<IcmpPacket, IcmpRequestError> {
+    let icmp_packet = make_icmp_request(sequence);
+    let identifier = icmp_packet.identifier();
+
+    let ip_packet = ip::make_ip_packet(
+        ttl.unwrap_or(64),
+        Protocol::ICMP,
+        dst_ip.into(),
+        icmp_packet.to_bytes(),
+    )?;
+
+    let (tx, rx) = mpsc::channel();
+    let ip_layer = IP_LAYER.get().unwrap();
+    ip_layer.add_observer(tx);
+    ip_layer.send(ip_packet)?;
+
+    let start = Instant::now();
+    let result = loop {
+        if let Some(secs) = timeout {
+            if start.elapsed() > Duration::from_secs(secs as u64) {
+                break Err(IcmpRequestError::Timeout(secs));
+            }
+        }
+
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(ip_packet) => {
+                if let Ok(icmp_packet) = TryInto::<IcmpPacket>::try_into(&*ip_packet) {
+                    if icmp_packet.icmp_type() == IcmpType::EchoReply
+                        && icmp_packet.identifier() == identifier
+                        && icmp_packet.sequence() == sequence
+                    {
+                        return Ok(icmp_packet);
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => continue,
+        }
+    };
+
+    result
 }
