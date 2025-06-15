@@ -5,3 +5,72 @@ mod host;
 mod ip;
 mod types;
 mod utils;
+
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    sync::mpsc,
+};
+
+use pnet::datalink::NetworkInterface;
+use thiserror;
+
+use crate::ethernet::EthernetLayer;
+use crate::types::MacAddr;
+
+#[derive(Debug, thiserror::Error)]
+pub enum InterfaceError {
+    #[error("MAC address not available for interface")]
+    MacNotFound,
+    #[error("IPv4 address not found for interface")]
+    Ipv4NotFound,
+}
+
+fn extract_interface_info_detailed(
+    interface: &NetworkInterface,
+) -> Result<(MacAddr, Ipv4Addr, Ipv4Addr), InterfaceError> {
+    let mac_addr = interface.mac.ok_or(InterfaceError::MacNotFound)?;
+
+    let mac_addr = MacAddr::new([
+        mac_addr.0, mac_addr.1, mac_addr.2, mac_addr.3, mac_addr.4, mac_addr.5,
+    ]);
+
+    let (ipv4_addr, netmask) = interface
+        .ips
+        .iter()
+        .find_map(|ip_network| match ip_network.ip() {
+            IpAddr::V4(ipv4) if !ipv4.is_loopback() => {
+                let prefix_len = ip_network.prefix();
+                Some((ipv4, host::netmask_from_prefix(prefix_len)))
+            }
+            _ => None,
+        })
+        .ok_or(InterfaceError::Ipv4NotFound)?;
+
+    Ok((mac_addr, ipv4_addr, netmask))
+}
+
+fn make_ethernet_sender(
+    ethernet_layer: &'static EthernetLayer,
+) -> impl Fn(ip::IpPacket) -> Result<(), ip::SendError> {
+    |ip_packet: ip::IpPacket| {
+        let frame = ip::make_ethernet_frame(&ip_packet)?;
+        ethernet_layer.send(frame)?;
+        Ok(())
+    }
+}
+
+pub fn setup(
+    interface: NetworkInterface,
+    gateway: impl Into<Ipv4Addr>,
+) -> Result<(), InterfaceError> {
+    let (mac_addr, ip, netmask) = extract_interface_info_detailed(&interface)?;
+
+    host::init(mac_addr, ip, netmask, gateway.into());
+    let ethernet_layer = ethernet::setup(&interface);
+
+    let (tx, rx) = mpsc::channel();
+    ethernet_layer.add_observer(tx);
+    ip::setup(make_ethernet_sender(ethernet_layer), rx);
+
+    Ok(())
+}

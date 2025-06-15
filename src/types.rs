@@ -1,5 +1,7 @@
 use std::{fmt::Display, ops::Deref};
 
+use pnet::datalink::MacAddr as _MacAddr;
+
 fn to_hex_string(data: &[u8]) -> String {
     format!(
         "{}",
@@ -50,6 +52,12 @@ impl From<[u8; 6]> for MacAddr {
 impl From<MacAddr> for [u8; 6] {
     fn from(value: MacAddr) -> Self {
         value.0
+    }
+}
+
+impl From<_MacAddr> for MacAddr {
+    fn from(value: _MacAddr) -> Self {
+        Self(value.octets())
     }
 }
 

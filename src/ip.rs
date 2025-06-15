@@ -1,15 +1,20 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::net::Ipv4Addr;
-use std::sync::mpsc::{self, Receiver, SendError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use log::{debug, error, info, warn};
 use thiserror::Error;
 
+use crate::arp::{self, ArpRequestError};
 use crate::ethernet::{EtherType, EthernetFrame};
+use crate::host;
+use crate::types::MacAddr;
 use crate::utils;
+
+pub(crate) static IP_LAYER: OnceLock<IpLayer> = OnceLock::new();
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -342,7 +347,7 @@ pub enum SendError {
 }
 
 #[derive(Debug)]
-pub struct IpLayer {
+pub(crate) struct IpLayer {
     sender: Sender<IpPacket>,
     observers: Arc<Mutex<Vec<Sender<Arc<IpPacket>>>>>,
 }
@@ -430,4 +435,29 @@ impl IpLayer {
     pub fn send(&self, packet: IpPacket) -> Result<(), mpsc::SendError<IpPacket>> {
         self.sender.send(packet)
     }
+}
+
+pub(crate) fn setup(
+    ethernet_sender: impl Fn(IpPacket) -> Result<(), SendError> + Send + 'static,
+    receiver: Receiver<Arc<EthernetFrame>>,
+) -> &'static IpLayer {
+    IP_LAYER.get_or_init(|| IpLayer::start(ethernet_sender, receiver))
+}
+
+pub(crate) fn make_ethernet_frame(ip_packet: &IpPacket) -> Result<EthernetFrame, ArpRequestError> {
+    let dst_ip = ip_packet.dst_ip();
+    let src_mac = host::HOST_MAC.get().unwrap();
+    let dst_mac = if host::check_if_within_network(&dst_ip) {
+        arp::arp_request(dst_ip, Some(1))?
+    } else {
+        let gateway = host::GATEWAY.get().unwrap();
+        arp::arp_request(*gateway, Some(1))?
+    };
+
+    Ok(EthernetFrame::new(
+        dst_mac,
+        *src_mac,
+        EtherType::IpV4,
+        ip_packet.to_bytes(),
+    ))
 }

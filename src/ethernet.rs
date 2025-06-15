@@ -161,7 +161,7 @@ impl EthernetFrame {
 }
 
 #[derive(Debug)]
-pub struct EthernetLayer {
+pub(crate) struct EthernetLayer {
     sender: Sender<EthernetFrame>,
     observers: Arc<Mutex<Vec<Sender<Arc<EthernetFrame>>>>>,
 }
@@ -254,6 +254,6 @@ impl EthernetLayer {
     }
 }
 
-pub fn init(interface: &NetworkInterface) {
-    ETHERNET_LAYER.get_or_init(|| EthernetLayer::start(interface));
+pub(crate) fn setup(interface: &NetworkInterface) -> &'static EthernetLayer {
+    ETHERNET_LAYER.get_or_init(|| EthernetLayer::start(interface))
 }
