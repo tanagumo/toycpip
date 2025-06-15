@@ -274,21 +274,49 @@ pub(crate) enum IcmpRequestError {
     IpPacket(#[from] IpPacketError),
 }
 
+#[derive(Debug)]
+pub struct PingResult {
+    dst_ip: Ipv4Addr,
+    sequence: u16,
+    elapsed: Duration,
+    ttl: u8,
+    bytes_sent: u16,
+}
+
+impl PingResult {
+    pub fn dst_ip(&self) -> Ipv4Addr {
+        self.dst_ip
+    }
+
+    pub fn sequence(&self) -> u16 {
+        self.sequence
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        self.elapsed
+    }
+
+    pub fn ttl(&self) -> u8 {
+        self.ttl
+    }
+
+    pub fn bytes_sent(&self) -> u16 {
+        self.bytes_sent
+    }
+}
+
 pub(crate) fn send_icmp_echo_request(
     dst_ip: impl Into<Ipv4Addr>,
     sequence: u16,
     ttl: Option<u8>,
     timeout: Option<u8>,
-) -> Result<IcmpPacket, IcmpRequestError> {
+) -> Result<PingResult, IcmpRequestError> {
     let icmp_packet = make_icmp_request(sequence);
     let identifier = icmp_packet.identifier();
+    let ttl = ttl.unwrap_or(64);
 
-    let ip_packet = ip::make_ip_packet(
-        ttl.unwrap_or(64),
-        Protocol::ICMP,
-        dst_ip.into(),
-        icmp_packet.to_bytes(),
-    )?;
+    let dst_ip = dst_ip.into();
+    let ip_packet = ip::make_ip_packet(ttl, Protocol::ICMP, dst_ip, icmp_packet.to_bytes())?;
 
     let (tx, rx) = mpsc::channel();
     let ip_layer = IP_LAYER.get().unwrap();
@@ -310,7 +338,13 @@ pub(crate) fn send_icmp_echo_request(
                         && icmp_packet.identifier() == identifier
                         && icmp_packet.sequence() == sequence
                     {
-                        return Ok(icmp_packet);
+                        return Ok(PingResult {
+                            dst_ip,
+                            sequence,
+                            elapsed: start.elapsed(),
+                            ttl,
+                            bytes_sent: ip_packet.total_length(),
+                        });
                     }
                 }
             }

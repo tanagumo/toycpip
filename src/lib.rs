@@ -16,6 +16,7 @@ use pnet::datalink::{self, NetworkInterface};
 use thiserror;
 
 use crate::ethernet::EthernetLayer;
+use crate::icmp::PingResult;
 use crate::types::MacAddr;
 
 #[derive(Debug, thiserror::Error)]
@@ -92,4 +93,12 @@ pub fn get_network_interface(name: &str) -> Result<NetworkInterface, InterfaceEr
         .filter(|iface: &NetworkInterface| iface.name == name)
         .next()
         .ok_or(InterfaceError::InterfaceNotFound)?)
+}
+
+pub fn send_icmp_request(
+    dst_ip: impl Into<Ipv4Addr>,
+    sequence: u16,
+) -> Result<PingResult, Box<dyn std::error::Error>> {
+    let dst_ip = dst_ip.into();
+    Ok(icmp::send_icmp_echo_request(dst_ip, sequence, None, None).map_err(|e| format!("{}", e))?)
 }
