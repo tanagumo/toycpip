@@ -2,6 +2,7 @@ mod arp;
 mod error;
 mod ethernet;
 mod host;
+mod icmp;
 mod ip;
 mod types;
 mod utils;
