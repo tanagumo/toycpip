@@ -5,6 +5,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
+use fastrand;
 use log::{debug, error, info, warn};
 use thiserror::Error;
 
@@ -24,6 +25,8 @@ pub(crate) enum IpPacketError {
     ChecksumMismatch(u16, u16),
     #[error("ihl must be greater than or equal to 5, but got {0}")]
     IhlTooSmall(u8),
+    #[error("ttl must be greater than 0")]
+    TtlTooSmall,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -153,6 +156,102 @@ pub(crate) struct IpPacket {
 }
 
 impl IpPacket {
+    fn new(
+        version: Version,
+        ihl: Ihl,
+        type_of_service: u8,
+        total_length: u16,
+        identification: u16,
+        flag: Flag,
+        fragment_offset: FragmentOffset,
+        ttl: u8,
+        protocol: Protocol,
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+        payload: Vec<u8>,
+    ) -> Self {
+        if version.as_u8() != 4 {
+            panic!(
+                "the value of `version` must be 0x04, but got 0x{:02x}",
+                version.as_u8()
+            );
+        }
+        if ihl.as_u8() != 5 {
+            panic!(
+                "the value of ihl must be 0x05, but got 0x{:02x}",
+                ihl.as_u8()
+            );
+        }
+        if total_length as usize != 20 + payload.len() {
+            panic!(
+                "the value of `total_length` must be {}, but got {}",
+                20 + payload.len(),
+                total_length
+            );
+        }
+        if ttl == 0 {
+            panic!("TTL must be greater than 0, but got {}", ttl);
+        }
+
+        let mut ip_packet = Self {
+            version,
+            ihl,
+            type_of_service,
+            total_length,
+            identification,
+            flag,
+            fragment_offset,
+            ttl,
+            protocol,
+            header_checksum: 0,
+            src_ip,
+            dst_ip,
+            padding: vec![],
+            payload,
+        };
+
+        ip_packet.header_checksum = ip_packet.calc_checksum();
+        ip_packet
+    }
+
+    fn calc_checksum(&self) -> u16 {
+        let total_length_array = self.total_length.to_be_bytes();
+        let identification_array = self.identification.to_be_bytes();
+        let flag_and_fragment_offset_array = {
+            let value = (self.flag.as_u8() as u16) << 13
+                | self.fragment_offset.as_u16() & 0b00011111_11111111;
+            value.to_be_bytes()
+        };
+        let header_checksum_array = self.header_checksum.to_be_bytes();
+        let src_ip_array = self.src_ip.octets();
+        let dst_ip_array = self.dst_ip.octets();
+
+        let array = [
+            (self.version.as_u8() << 4) | (self.ihl.as_u8() & 0b0000_1111),
+            self.type_of_service,
+            total_length_array[0],
+            total_length_array[1],
+            identification_array[0],
+            identification_array[1],
+            flag_and_fragment_offset_array[0],
+            flag_and_fragment_offset_array[1],
+            self.ttl,
+            self.protocol.into(),
+            header_checksum_array[0],
+            header_checksum_array[1],
+            src_ip_array[0],
+            src_ip_array[1],
+            src_ip_array[2],
+            src_ip_array[3],
+            dst_ip_array[0],
+            dst_ip_array[1],
+            dst_ip_array[2],
+            dst_ip_array[3],
+        ];
+
+        utils::calculate_checksum(&array, Some(10)).unwrap()
+    }
+
     pub(crate) fn version(&self) -> Version {
         self.version
     }
@@ -457,4 +556,30 @@ pub(crate) fn make_ethernet_frame(ip_packet: &IpPacket) -> Result<EthernetFrame,
         EtherType::IpV4,
         ip_packet.to_bytes(),
     ))
+}
+
+pub(crate) fn make_ip_packet(
+    ttl: u8,
+    protocol: Protocol,
+    dst_ip: impl Into<Ipv4Addr>,
+    payload: Vec<u8>,
+) -> Result<IpPacket, IpPacketError> {
+    if ttl == 0 {
+        Err(IpPacketError::TtlTooSmall)
+    } else {
+        Ok(IpPacket::new(
+            Version::new(4),
+            Ihl::new(5),
+            0,
+            20 + payload.len() as u16,
+            fastrand::u16(..),
+            Flag::new(2),
+            FragmentOffset::new(0),
+            ttl,
+            protocol,
+            *host::HOST_IP.get().unwrap(),
+            dst_ip.into(),
+            payload,
+        ))
+    }
 }
