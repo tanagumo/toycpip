@@ -76,7 +76,7 @@ pub(crate) struct Version(u8);
 
 impl Version {
     fn new(value: u8) -> Self {
-        Self(value >> 4)
+        Self(value)
     }
 
     fn as_u8(&self) -> u8 {
@@ -92,14 +92,13 @@ impl Ihl {
     /// constraint violations for Ihl, specifically cases where the value is less than 5,
     /// are considered program bugs and will cause a panic
     fn new(value: u8) -> Self {
-        let _value = value & 0b00001111;
-        if _value < 5 {
+        if value < 5 {
             panic!(
                 "the value of ihl must be greater than or equal to 0x05, but got 0x{:02x}",
                 value
             );
         }
-        Self(_value)
+        Self(value)
     }
 
     fn as_u8(&self) -> u8 {
@@ -112,7 +111,7 @@ pub(crate) struct Flag(u8);
 
 impl Flag {
     fn new(value: u8) -> Self {
-        Self(value >> 5)
+        Self(value)
     }
 
     fn as_u8(&self) -> u8 {
@@ -125,7 +124,7 @@ pub(crate) struct FragmentOffset(u16);
 
 impl FragmentOffset {
     fn new(value: u16) -> Self {
-        Self(value & 0b00011111_11111111)
+        Self(value)
     }
 
     fn as_u16(&self) -> u16 {
@@ -382,12 +381,12 @@ impl TryFrom<&EthernetFrame> for IpPacket {
             ))));
         }
 
-        let version = Version::new(payload[0]);
+        let version = Version::new(payload[0] >> 4);
         let ihl_value = payload[0] & 0b00001111;
         if ihl_value < 5 {
             return Err(IpPacketError::IhlTooSmall(ihl_value));
         }
-        let ihl = Ihl::new(payload[0]);
+        let ihl = Ihl::new(ihl_value);
         let type_of_service = payload[1];
         let header_length = (ihl_value as usize) * 4;
 
@@ -397,7 +396,8 @@ impl TryFrom<&EthernetFrame> for IpPacket {
         // flag and fragment_offset are in consecutive 2 bytes,
         // where the first 3 bits are flag and the remaining 13 bits are fragment_offset
         let flag = Flag::new(payload[6] >> 5);
-        let fragment_offset = FragmentOffset::new(u16::from_be_bytes([payload[6], payload[7]]));
+        let fragment_offset =
+            FragmentOffset::new(u16::from_be_bytes([payload[6], payload[7]]) & 0b00011111_11111111);
 
         let ttl = payload[8];
         let protocol = Protocol::from(payload[9]);
