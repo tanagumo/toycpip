@@ -11,7 +11,6 @@ use thiserror::Error;
 use crate::arp::{self, ArpRequestError};
 use crate::ethernet::{EtherType, EthernetFrame};
 use crate::host;
-use crate::types::MacAddr;
 use crate::utils;
 
 pub(crate) static IP_LAYER: OnceLock<IpLayer> = OnceLock::new();
