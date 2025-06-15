@@ -18,13 +18,13 @@ pub(crate) static ETHERNET_LAYER: OnceLock<EthernetLayer> = OnceLock::new();
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum EthernetFrameError {
+pub(crate) enum EthernetFrameError {
     #[error("ethernet frame too short: {0} bytes")]
     TooShort(usize),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum EtherType {
+pub(crate) enum EtherType {
     IpV4,
     Arp,
     Other(u16),
@@ -70,11 +70,11 @@ impl Display for EtherType {
 }
 
 impl EtherType {
-    pub const SIZE: usize = 2;
+    pub(crate) const SIZE: usize = 2;
 }
 
 #[derive(Debug)]
-pub struct EthernetFrame {
+pub(crate) struct EthernetFrame {
     dst_mac: MacAddr,
     src_mac: MacAddr,
     ether_type: EtherType,
@@ -116,7 +116,7 @@ impl TryFrom<&[u8]> for EthernetFrame {
 }
 
 impl EthernetFrame {
-    pub fn new(
+    pub(crate) fn new(
         dst_mac: MacAddr,
         src_mac: MacAddr,
         ether_type: EtherType,
@@ -130,27 +130,27 @@ impl EthernetFrame {
         }
     }
 
-    pub fn dst_mac(&self) -> MacAddr {
+    pub(crate) fn dst_mac(&self) -> MacAddr {
         self.dst_mac
     }
 
-    pub fn src_mac(&self) -> MacAddr {
+    pub(crate) fn src_mac(&self) -> MacAddr {
         self.src_mac
     }
 
-    pub fn ether_type(&self) -> EtherType {
+    pub(crate) fn ether_type(&self) -> EtherType {
         self.ether_type
     }
 
-    pub fn payload(&self) -> &[u8] {
+    pub(crate) fn payload(&self) -> &[u8] {
         &self.payload
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         MacAddr::SIZE * 2 + EtherType::SIZE + self.payload.len()
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(self.len());
         bytes.extend(&*self.dst_mac);
         bytes.extend(&*self.src_mac);
@@ -167,7 +167,7 @@ pub(crate) struct EthernetLayer {
 }
 
 impl EthernetLayer {
-    pub fn start(interface: &NetworkInterface) -> Self {
+    pub(crate) fn start(interface: &NetworkInterface) -> Self {
         let (mut _tx, mut _rx) = match datalink::channel(interface, Default::default()) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
             Ok(_) => panic!("Unhandled channel type"),
@@ -243,13 +243,13 @@ impl EthernetLayer {
         }
     }
 
-    pub fn add_observer(&self, observer: Sender<Arc<EthernetFrame>>) {
+    pub(crate) fn add_observer(&self, observer: Sender<Arc<EthernetFrame>>) {
         let mut guard = self.observers.lock().unwrap();
         guard.push(observer);
         debug!("Added Ethernet observer: total_count={}", guard.len());
     }
 
-    pub fn send(&self, frame: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
+    pub(crate) fn send(&self, frame: EthernetFrame) -> Result<(), SendError<EthernetFrame>> {
         self.sender.send(frame)
     }
 }

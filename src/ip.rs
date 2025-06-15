@@ -18,7 +18,7 @@ pub(crate) static IP_LAYER: OnceLock<IpLayer> = OnceLock::new();
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum IpPacketError {
+pub(crate) enum IpPacketError {
     #[error("malformed ip packet: {0}")]
     Malformed(Cow<'static, str>),
     #[error("checksum mismatch: expected: {0}, actual: {1}")]
@@ -28,7 +28,7 @@ pub enum IpPacketError {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum Protocol {
+pub(crate) enum Protocol {
     ICMP,
     TCP,
     UDP,
@@ -70,7 +70,7 @@ impl From<u8> for Protocol {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct Version(u8);
+pub(crate) struct Version(u8);
 
 impl Version {
     fn new(value: u8) -> Self {
@@ -83,7 +83,7 @@ impl Version {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct Ihl(u8);
+pub(crate) struct Ihl(u8);
 
 impl Ihl {
     /// Ihl instances are only created from IpPacket with the assumption that
@@ -106,7 +106,7 @@ impl Ihl {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct Flag(u8);
+pub(crate) struct Flag(u8);
 
 impl Flag {
     fn new(value: u8) -> Self {
@@ -119,7 +119,7 @@ impl Flag {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct FragmentOffset(u16);
+pub(crate) struct FragmentOffset(u16);
 
 impl FragmentOffset {
     fn new(value: u16) -> Self {
@@ -136,7 +136,7 @@ impl FragmentOffset {
 }
 
 #[derive(Debug)]
-pub struct IpPacket {
+pub(crate) struct IpPacket {
     version: Version,
     ihl: Ihl,
     type_of_service: u8,
@@ -154,63 +154,63 @@ pub struct IpPacket {
 }
 
 impl IpPacket {
-    pub fn version(&self) -> Version {
+    pub(crate) fn version(&self) -> Version {
         self.version
     }
 
-    pub fn ihl(&self) -> Ihl {
+    pub(crate) fn ihl(&self) -> Ihl {
         self.ihl
     }
 
-    pub fn type_of_service(&self) -> u8 {
+    pub(crate) fn type_of_service(&self) -> u8 {
         self.type_of_service
     }
 
-    pub fn total_length(&self) -> u16 {
+    pub(crate) fn total_length(&self) -> u16 {
         self.total_length
     }
 
-    pub fn identification(&self) -> u16 {
+    pub(crate) fn identification(&self) -> u16 {
         self.identification
     }
 
-    pub fn flag(&self) -> Flag {
+    pub(crate) fn flag(&self) -> Flag {
         self.flag
     }
 
-    pub fn fragment_offset(&self) -> FragmentOffset {
+    pub(crate) fn fragment_offset(&self) -> FragmentOffset {
         self.fragment_offset
     }
 
-    pub fn ttl(&self) -> u8 {
+    pub(crate) fn ttl(&self) -> u8 {
         self.ttl
     }
 
-    pub fn protocol(&self) -> Protocol {
+    pub(crate) fn protocol(&self) -> Protocol {
         self.protocol
     }
 
-    pub fn header_checksum(&self) -> u16 {
+    pub(crate) fn header_checksum(&self) -> u16 {
         self.header_checksum
     }
 
-    pub fn src_ip(&self) -> Ipv4Addr {
+    pub(crate) fn src_ip(&self) -> Ipv4Addr {
         self.src_ip
     }
 
-    pub fn dst_ip(&self) -> Ipv4Addr {
+    pub(crate) fn dst_ip(&self) -> Ipv4Addr {
         self.dst_ip
     }
 
-    pub fn padding(&self) -> &[u8] {
+    pub(crate) fn padding(&self) -> &[u8] {
         &self.padding
     }
 
-    pub fn payload(&self) -> &[u8] {
+    pub(crate) fn payload(&self) -> &[u8] {
         &self.payload
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let capacity = 20 + self.padding.len() + self.payload.len();
 
         let mut v = Vec::with_capacity(capacity);
@@ -339,7 +339,7 @@ impl TryFrom<&EthernetFrame> for IpPacket {
 }
 
 #[derive(Debug, Error)]
-pub enum SendError {
+pub(crate) enum SendError {
     #[error("failed to send packet")]
     SendError(#[from] mpsc::SendError<EthernetFrame>),
     #[error("failed to arp request: {0}")]
@@ -353,7 +353,7 @@ pub(crate) struct IpLayer {
 }
 
 impl IpLayer {
-    pub fn start(
+    pub(crate) fn start(
         ethernet_sender: impl Fn(IpPacket) -> Result<(), SendError> + Send + 'static,
         receiver: Receiver<Arc<EthernetFrame>>,
     ) -> Self {
@@ -426,13 +426,13 @@ impl IpLayer {
         }
     }
 
-    pub fn add_observer(&self, observer: Sender<Arc<IpPacket>>) {
+    pub(crate) fn add_observer(&self, observer: Sender<Arc<IpPacket>>) {
         let mut guard = self.observers.lock().unwrap();
         guard.push(observer);
         debug!("Added IP observer: total_count={}", guard.len());
     }
 
-    pub fn send(&self, packet: IpPacket) -> Result<(), mpsc::SendError<IpPacket>> {
+    pub(crate) fn send(&self, packet: IpPacket) -> Result<(), mpsc::SendError<IpPacket>> {
         self.sender.send(packet)
     }
 }

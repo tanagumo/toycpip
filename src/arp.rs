@@ -11,7 +11,7 @@ use crate::types::MacAddr;
 
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum ArpPacketField {
+pub(crate) enum ArpPacketField {
     HardwareType,
     ProtocolType,
     HardwareSize,
@@ -34,7 +34,7 @@ impl Display for ArpPacketField {
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum ArpPacketError {
+pub(crate) enum ArpPacketError {
     #[error("malformed arp packet field: {0}: {1}")]
     MalformedField(ArpPacketField, Cow<'static, str>),
     #[error("malformed arp packet: {0}")]
@@ -42,7 +42,7 @@ pub enum ArpPacketError {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum OpCode {
+pub(crate) enum OpCode {
     Request,
     Response,
 }
@@ -89,7 +89,7 @@ impl TryFrom<[u8; 2]> for OpCode {
 }
 
 #[derive(Debug)]
-pub struct ArpPacket {
+pub(crate) struct ArpPacket {
     hardware_type: u16,
     protocol_type: u16,
     hardware_size: u8,
@@ -102,45 +102,45 @@ pub struct ArpPacket {
 }
 
 impl ArpPacket {
-    pub const SIZE: usize = 28;
+    pub(crate) const SIZE: usize = 28;
 
-    fn hardware_type(&self) -> u16 {
+    pub(crate) fn hardware_type(&self) -> u16 {
         self.hardware_type
     }
 
-    fn protocol_type(&self) -> u16 {
+    pub(crate) fn protocol_type(&self) -> u16 {
         self.protocol_type
     }
 
-    fn hardware_size(&self) -> u8 {
+    pub(crate) fn hardware_size(&self) -> u8 {
         self.hardware_size
     }
 
-    fn protocol_size(&self) -> u8 {
+    pub(crate) fn protocol_size(&self) -> u8 {
         self.protocol_size
     }
 
-    fn op_code(&self) -> &OpCode {
+    pub(crate) fn op_code(&self) -> &OpCode {
         &self.op_code
     }
 
-    fn sender_mac(&self) -> &MacAddr {
+    pub(crate) fn sender_mac(&self) -> &MacAddr {
         &self.sender_mac
     }
 
-    fn sender_ip(&self) -> &Ipv4Addr {
+    pub(crate) fn sender_ip(&self) -> &Ipv4Addr {
         &self.sender_ip
     }
 
-    fn target_mac(&self) -> &MacAddr {
+    pub(crate) fn target_mac(&self) -> &MacAddr {
         &self.target_mac
     }
 
-    fn target_ip(&self) -> &Ipv4Addr {
+    pub(crate) fn target_ip(&self) -> &Ipv4Addr {
         &self.target_ip
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let mut ret = Vec::with_capacity(Self::SIZE);
         ret.extend(u16::to_be_bytes(self.hardware_type));
         ret.extend(u16::to_be_bytes(self.protocol_type));
@@ -266,14 +266,17 @@ impl TryFrom<&EthernetFrame> for ArpPacket {
 }
 
 #[derive(Debug, Error)]
-pub enum ArpRequestError {
+pub(crate) enum ArpRequestError {
     #[error("timeout: {0} seconds")]
     Timeout(u8),
     #[error("send error: {0}")]
     SendError(#[from] SendError<EthernetFrame>),
 }
 
-pub fn arp_request(target_ip: Ipv4Addr, timeout: Option<u8>) -> Result<MacAddr, ArpRequestError> {
+pub(crate) fn arp_request(
+    target_ip: Ipv4Addr,
+    timeout: Option<u8>,
+) -> Result<MacAddr, ArpRequestError> {
     let host_mac = *HOST_MAC.get().unwrap();
     let host_ip = *HOST_IP.get().unwrap();
 

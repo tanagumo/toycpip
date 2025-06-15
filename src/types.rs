@@ -12,7 +12,7 @@ fn to_hex_string(data: &[u8]) -> String {
     )
 }
 
-pub trait HexStringExt {
+pub(crate) trait HexStringExt {
     fn hex_string(&self) -> String;
 }
 
@@ -23,16 +23,16 @@ impl HexStringExt for [u8] {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct MacAddr([u8; 6]);
+pub(crate) struct MacAddr([u8; 6]);
 
 impl MacAddr {
-    pub const SIZE: usize = 6;
+    pub(crate) const SIZE: usize = 6;
 
-    pub fn new(value: [u8; 6]) -> Self {
+    pub(crate) fn new(value: [u8; 6]) -> Self {
         Self(value)
     }
 
-    pub fn octets(&self) -> [u8; 6] {
+    pub(crate) fn octets(&self) -> [u8; 6] {
         self.0
     }
 }

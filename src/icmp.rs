@@ -6,7 +6,7 @@ use crate::ip::IpPacket;
 use crate::utils;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum IcmpType {
+pub(crate) enum IcmpType {
     EchoRequest,
     EchoReply,
     Other(u8),
@@ -44,7 +44,7 @@ impl From<u8> for IcmpType {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct Code(u8);
+pub(crate) struct Code(u8);
 
 impl Display for Code {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -70,7 +70,7 @@ impl Code {
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum IcmpPacketError {
+pub(crate) enum IcmpPacketError {
     #[error("malformed icmp packet: {0}")]
     Malformed(Cow<'static, str>),
     #[error("the value of code must be 0, but got {0}")]
@@ -80,7 +80,7 @@ pub enum IcmpPacketError {
 }
 
 #[derive(Debug)]
-pub struct IcmpPacket {
+pub(crate) struct IcmpPacket {
     icmp_type: IcmpType,
     code: Code,
     checksum: u16,
@@ -100,31 +100,31 @@ impl Display for IcmpPacket {
 }
 
 impl IcmpPacket {
-    pub fn icmp_type(&self) -> IcmpType {
+    pub(crate) fn icmp_type(&self) -> IcmpType {
         self.icmp_type
     }
 
-    pub fn code(&self) -> Code {
+    pub(crate) fn code(&self) -> Code {
         self.code
     }
 
-    pub fn checksum(&self) -> u16 {
+    pub(crate) fn checksum(&self) -> u16 {
         self.checksum
     }
 
-    pub fn identifier(&self) -> u16 {
+    pub(crate) fn identifier(&self) -> u16 {
         self.identifier
     }
 
-    pub fn sequence(&self) -> u16 {
+    pub(crate) fn sequence(&self) -> u16 {
         self.sequence
     }
 
-    pub fn payload(&self) -> &[u8] {
+    pub(crate) fn payload(&self) -> &[u8] {
         &self.payload
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let capacity = 8 + self.payload.len();
         let checksum_array = self.checksum.to_be_bytes();
         let ident_array = self.identifier.to_be_bytes();
