@@ -225,7 +225,7 @@ impl IpPacket {
 
         // Minimize the number of extend calls for performance optimization
         v.extend([
-            self.version.as_u8() | self.ihl.as_u8(),
+            (self.version.as_u8() << 4) | (self.ihl.as_u8() & 0b0000_1111),
             self.type_of_service,
             total_length_array[0],
             total_length_array[1],
