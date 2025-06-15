@@ -333,6 +333,14 @@ impl TryFrom<&EthernetFrame> for IpPacket {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum SendError {
+    #[error("failed to send packet")]
+    SendError(#[from] mpsc::SendError<EthernetFrame>),
+    #[error("failed to arp request: {0}")]
+    ArpRequest(#[from] ArpRequestError),
+}
+
 #[derive(Debug)]
 pub struct IpLayer {
     sender: Sender<IpPacket>,
@@ -341,7 +349,7 @@ pub struct IpLayer {
 
 impl IpLayer {
     pub fn start(
-        ethernet_sender: impl Fn(IpPacket) -> Result<(), SendError<EthernetFrame>> + Send + 'static,
+        ethernet_sender: impl Fn(IpPacket) -> Result<(), SendError> + Send + 'static,
         receiver: Receiver<Arc<EthernetFrame>>,
     ) -> Self {
         info!("Starting IP layer");
@@ -419,7 +427,7 @@ impl IpLayer {
         debug!("Added IP observer: total_count={}", guard.len());
     }
 
-    pub fn send(&self, packet: IpPacket) -> Result<(), SendError<IpPacket>> {
+    pub fn send(&self, packet: IpPacket) -> Result<(), mpsc::SendError<IpPacket>> {
         self.sender.send(packet)
     }
 }
