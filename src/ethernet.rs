@@ -12,6 +12,7 @@ use log::{debug, error, info, warn};
 use pnet::datalink::{self, Channel::Ethernet, NetworkInterface};
 use thiserror::Error;
 
+use crate::host;
 use crate::types::{HexStringExt, MacAddr};
 
 pub(crate) static ETHERNET_LAYER: OnceLock<EthernetLayer> = OnceLock::new();
@@ -116,12 +117,7 @@ impl TryFrom<&[u8]> for EthernetFrame {
 }
 
 impl EthernetFrame {
-    pub(crate) fn new(
-        dst_mac: MacAddr,
-        src_mac: MacAddr,
-        ether_type: EtherType,
-        payload: Vec<u8>,
-    ) -> Self {
+    fn new(dst_mac: MacAddr, src_mac: MacAddr, ether_type: EtherType, payload: Vec<u8>) -> Self {
         Self {
             dst_mac,
             src_mac,
@@ -256,4 +252,13 @@ impl EthernetLayer {
 
 pub(crate) fn setup(interface: &NetworkInterface) -> &'static EthernetLayer {
     ETHERNET_LAYER.get_or_init(|| EthernetLayer::start(interface))
+}
+
+pub(crate) fn make_frame(
+    dst_mac: MacAddr,
+    ether_type: EtherType,
+    payload: Vec<u8>,
+) -> EthernetFrame {
+    let src_mac = host::HOST_MAC.get().unwrap();
+    EthernetFrame::new(dst_mac, *src_mac, ether_type, payload)
 }

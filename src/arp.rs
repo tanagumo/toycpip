@@ -5,8 +5,8 @@ use std::{fmt::Display, net::Ipv4Addr};
 
 use thiserror::Error;
 
-use crate::ethernet::{ETHERNET_LAYER, EtherType, EthernetFrame};
-use crate::host::{HOST_IP, HOST_MAC};
+use crate::ethernet::{self, ETHERNET_LAYER, EtherType, EthernetFrame};
+use crate::host::{self, HOST_IP, HOST_MAC};
 use crate::types::MacAddr;
 
 #[derive(Debug)]
@@ -102,6 +102,38 @@ pub(crate) struct ArpPacket {
 }
 
 impl ArpPacket {
+    fn new(
+        hardware_type: u16,
+        protocol_type: u16,
+        hardware_size: u8,
+        protocol_size: u8,
+        op_code: OpCode,
+        sender_mac: MacAddr,
+        sender_ip: Ipv4Addr,
+        target_mac: MacAddr,
+        target_ip: Ipv4Addr,
+    ) -> Self {
+        if !host::check_if_within_network(&target_ip) {
+            panic!("`target_ip` must be local network address");
+        }
+
+        if target_mac != MacAddr::zero() {
+            panic!("`target_mac` must be zero");
+        }
+
+        Self {
+            hardware_type,
+            protocol_type,
+            hardware_size,
+            protocol_size,
+            op_code,
+            sender_mac,
+            sender_ip,
+            target_mac,
+            target_ip,
+        }
+    }
+
     pub(crate) const SIZE: usize = 28;
 
     pub(crate) fn hardware_type(&self) -> u16 {
@@ -271,32 +303,37 @@ pub(crate) enum ArpRequestError {
     Timeout(u8),
     #[error("send error: {0}")]
     SendError(#[from] SendError<EthernetFrame>),
+    #[error("target_ip is not in the local network address")]
+    NotLocalAddress,
 }
 
 pub(crate) fn arp_request(
     target_ip: Ipv4Addr,
     timeout: Option<u8>,
 ) -> Result<MacAddr, ArpRequestError> {
+    if !host::check_if_within_network(&target_ip) {
+        return Err(ArpRequestError::NotLocalAddress);
+    }
+
     let host_mac = *HOST_MAC.get().unwrap();
     let host_ip = *HOST_IP.get().unwrap();
 
-    let packet = ArpPacket {
-        hardware_type: 0x0001,
-        protocol_type: 0x0800,
-        hardware_size: 0x06,
-        protocol_size: 0x04,
-        op_code: OpCode::Request,
-        sender_mac: host_mac,
-        sender_ip: host_ip,
-        target_mac: MacAddr::new([0x00; 6]),
-        target_ip,
-    };
-
-    let frame = EthernetFrame::new(
-        MacAddr::new([0xff; 6]),
+    let arp_packet = ArpPacket::new(
+        0x0001,
+        0x0800,
+        0x06,
+        0x04,
+        OpCode::Request,
         host_mac,
+        host_ip,
+        MacAddr::new([0x00; 6]),
+        target_ip,
+    );
+
+    let frame = ethernet::make_frame(
+        MacAddr::new([0xff; 6]),
         EtherType::Arp,
-        packet.to_bytes(),
+        arp_packet.to_bytes(),
     );
 
     let (tx, rx) = mpsc::channel();

@@ -9,7 +9,7 @@ use log::{debug, error, info, warn};
 use thiserror::Error;
 
 use crate::arp::{self, ArpRequestError};
-use crate::ethernet::{EtherType, EthernetFrame};
+use crate::ethernet::{self, EtherType, EthernetFrame};
 use crate::host;
 use crate::utils;
 
@@ -445,7 +445,6 @@ pub(crate) fn setup(
 
 pub(crate) fn make_ethernet_frame(ip_packet: &IpPacket) -> Result<EthernetFrame, ArpRequestError> {
     let dst_ip = ip_packet.dst_ip();
-    let src_mac = host::HOST_MAC.get().unwrap();
     let dst_mac = if host::check_if_within_network(&dst_ip) {
         arp::arp_request(dst_ip, Some(1))?
     } else {
@@ -453,9 +452,8 @@ pub(crate) fn make_ethernet_frame(ip_packet: &IpPacket) -> Result<EthernetFrame,
         arp::arp_request(*gateway, Some(1))?
     };
 
-    Ok(EthernetFrame::new(
+    Ok(ethernet::make_frame(
         dst_mac,
-        *src_mac,
         EtherType::IpV4,
         ip_packet.to_bytes(),
     ))

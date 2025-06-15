@@ -35,6 +35,10 @@ impl MacAddr {
     pub(crate) fn octets(&self) -> [u8; 6] {
         self.0
     }
+
+    pub(crate) const fn zero() -> Self {
+        Self([0u8; 6])
+    }
 }
 
 impl Display for MacAddr {
