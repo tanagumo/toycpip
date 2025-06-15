@@ -12,18 +12,21 @@ use std::{
     sync::mpsc,
 };
 
-use pnet::datalink::NetworkInterface;
+use pnet::datalink::{self, NetworkInterface};
 use thiserror;
 
 use crate::ethernet::EthernetLayer;
 use crate::types::MacAddr;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum InterfaceError {
     #[error("MAC address not available for interface")]
     MacNotFound,
     #[error("IPv4 address not found for interface")]
     Ipv4NotFound,
+    #[error("specified network interface not found")]
+    InterfaceNotFound,
 }
 
 fn extract_interface_info_detailed(
@@ -74,4 +77,19 @@ pub fn setup(
     ip::setup(make_ethernet_sender(ethernet_layer), rx);
 
     Ok(())
+}
+
+pub fn arp_request(
+    ip: impl Into<Ipv4Addr>,
+    timeout: Option<u8>,
+) -> Result<MacAddr, Box<dyn std::error::Error>> {
+    Ok(arp::arp_request(ip.into(), timeout).map_err(|e| format!("{}", e))?)
+}
+
+pub fn get_network_interface(name: &str) -> Result<NetworkInterface, InterfaceError> {
+    Ok(datalink::interfaces()
+        .into_iter()
+        .filter(|iface: &NetworkInterface| iface.name == name)
+        .next()
+        .ok_or(InterfaceError::InterfaceNotFound)?)
 }

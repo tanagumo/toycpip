@@ -23,7 +23,7 @@ impl HexStringExt for [u8] {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) struct MacAddr([u8; 6]);
+pub struct MacAddr([u8; 6]);
 
 impl MacAddr {
     pub(crate) const SIZE: usize = 6;
