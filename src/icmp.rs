@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt::Display};
+use std::{borrow::Cow, fmt::Display, process};
 
 use thiserror::Error;
 
@@ -100,6 +100,54 @@ impl Display for IcmpPacket {
 }
 
 impl IcmpPacket {
+    fn new(
+        icmp_type: IcmpType,
+        code: Code,
+        identifier: u16,
+        sequence: u16,
+        payload: Vec<u8>,
+    ) -> Self {
+        if icmp_type == IcmpType::EchoRequest && code.as_u8() != 0 {
+            panic!("Echo Request code must be 0, but got {}", code.as_u8());
+        }
+
+        let mut icmp = Self {
+            icmp_type,
+            code,
+            checksum: 0,
+            identifier,
+            sequence,
+            payload,
+        };
+
+        let checksum = icmp.calc_checksum();
+        icmp.checksum = checksum;
+        icmp
+    }
+
+    fn calc_checksum(&self) -> u16 {
+        let identifier_array = self.identifier.to_be_bytes();
+        let sequence_array = self.sequence.to_be_bytes();
+        let mut v = Vec::with_capacity(8 + self.payload.len());
+        v.extend([
+            self.icmp_type.into(),
+            self.code.as_u8(),
+            0,
+            0,
+            identifier_array[0],
+            identifier_array[1],
+            sequence_array[0],
+            sequence_array[1],
+        ]);
+        v.extend(self.payload());
+
+        if v.len() % 2 != 0 {
+            v.push(0);
+        }
+
+        utils::calculate_checksum(&v, Some(2)).unwrap()
+    }
+
     pub(crate) fn icmp_type(&self) -> IcmpType {
         self.icmp_type
     }
@@ -197,4 +245,18 @@ impl TryFrom<&IpPacket> for IcmpPacket {
             payload: payload[8..].to_vec(),
         })
     }
+}
+
+pub(crate) fn make_icmp_request(sequence: u16) -> IcmpPacket {
+    if sequence == 0 {
+        panic!("the value of `sequence` must be greater than 0");
+    }
+
+    IcmpPacket::new(
+        IcmpType::EchoRequest,
+        Code::new(0),
+        process::id() as u16,
+        sequence,
+        vec![],
+    )
 }
