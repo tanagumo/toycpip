@@ -149,63 +149,63 @@ pub struct IpPacket {
 }
 
 impl IpPacket {
-    fn version(&self) -> Version {
+    pub fn version(&self) -> Version {
         self.version
     }
 
-    fn ihl(&self) -> Ihl {
+    pub fn ihl(&self) -> Ihl {
         self.ihl
     }
 
-    fn type_of_service(&self) -> u8 {
+    pub fn type_of_service(&self) -> u8 {
         self.type_of_service
     }
 
-    fn total_length(&self) -> u16 {
+    pub fn total_length(&self) -> u16 {
         self.total_length
     }
 
-    fn identification(&self) -> u16 {
+    pub fn identification(&self) -> u16 {
         self.identification
     }
 
-    fn flag(&self) -> Flag {
+    pub fn flag(&self) -> Flag {
         self.flag
     }
 
-    fn fragment_offset(&self) -> FragmentOffset {
+    pub fn fragment_offset(&self) -> FragmentOffset {
         self.fragment_offset
     }
 
-    fn ttl(&self) -> u8 {
+    pub fn ttl(&self) -> u8 {
         self.ttl
     }
 
-    fn protocol(&self) -> Protocol {
+    pub fn protocol(&self) -> Protocol {
         self.protocol
     }
 
-    fn header_checksum(&self) -> u16 {
+    pub fn header_checksum(&self) -> u16 {
         self.header_checksum
     }
 
-    fn src_ip(&self) -> Ipv4Addr {
+    pub fn src_ip(&self) -> Ipv4Addr {
         self.src_ip
     }
 
-    fn dst_ip(&self) -> Ipv4Addr {
+    pub fn dst_ip(&self) -> Ipv4Addr {
         self.dst_ip
     }
 
-    fn padding(&self) -> &[u8] {
+    pub fn padding(&self) -> &[u8] {
         &self.padding
     }
 
-    fn payload(&self) -> &[u8] {
+    pub fn payload(&self) -> &[u8] {
         &self.payload
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let capacity = 20 + self.padding.len() + self.payload.len();
 
         let mut v = Vec::with_capacity(capacity);
