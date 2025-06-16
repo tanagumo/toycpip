@@ -76,6 +76,12 @@ pub(crate) struct Version(u8);
 
 impl Version {
     fn new(value: u8) -> Self {
+        if value >= 0x10 {
+            panic!(
+                "The value of `version` must be smaller than 0x10, but got 0x{:02x}",
+                value
+            );
+        }
         Self(value)
     }
 
@@ -94,7 +100,13 @@ impl Ihl {
     fn new(value: u8) -> Self {
         if value < 5 {
             panic!(
-                "the value of ihl must be greater than or equal to 0x05, but got 0x{:02x}",
+                "the value of `ihl` must be greater than or equal to 0x05, but got 0x{:02x}",
+                value
+            );
+        }
+        if value >= 0x10 {
+            panic!(
+                "the value of `ihl` must be smaller than 0x10, but got 0x{:02x}",
                 value
             );
         }
@@ -111,6 +123,12 @@ pub(crate) struct Flag(u8);
 
 impl Flag {
     fn new(value: u8) -> Self {
+        if value >= 0x08 {
+            panic!(
+                "the value of `flag` must be smaller than 0x08, but got 0x{:02x}",
+                value
+            );
+        }
         Self(value)
     }
 
@@ -124,6 +142,12 @@ pub(crate) struct FragmentOffset(u16);
 
 impl FragmentOffset {
     fn new(value: u16) -> Self {
+        if value >= 0x2000 {
+            panic!(
+                "the value of `fragment_offset` must be smaller than 0x2000, but got 0x{:04x}",
+                value
+            );
+        }
         Self(value)
     }
 
