@@ -3,6 +3,7 @@ mod ethernet;
 mod host;
 mod icmp;
 mod ip;
+mod tcp;
 mod types;
 mod utils;
 
