@@ -78,7 +78,7 @@ pub(crate) enum IcmpPacketError {
     Malformed(Cow<'static, str>),
     #[error("the value of code must be 0, but got {0}")]
     InvalidCode(u8),
-    #[error("checksum mismatch: expected: {0}, actual: {1}")]
+    #[error("checksum mismatch: calculated: {0}, actual: {1}")]
     ChecksumMismatch(u16, u16),
 }
 
@@ -230,8 +230,8 @@ impl TryFrom<&IpPacket> for IcmpPacket {
         let calculated_checksum = utils::calculate_checksum(&payload, Some(2)).unwrap();
         if checksum != calculated_checksum {
             return Err(IcmpPacketError::ChecksumMismatch(
-                checksum,
                 calculated_checksum,
+                checksum,
             ));
         }
 

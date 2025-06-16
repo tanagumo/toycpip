@@ -21,7 +21,7 @@ pub(crate) static IP_LAYER: OnceLock<IpLayer> = OnceLock::new();
 pub(crate) enum IpPacketError {
     #[error("malformed ip packet: {0}")]
     Malformed(Cow<'static, str>),
-    #[error("checksum mismatch: expected: {0}, actual: {1}")]
+    #[error("checksum mismatch: calculated: {0}, actual: {1}")]
     ChecksumMismatch(u16, u16),
     #[error("ihl must be greater than or equal to 5, but got {0}")]
     IhlTooSmall(u8),
@@ -436,8 +436,8 @@ impl TryFrom<&EthernetFrame> for IpPacket {
 
         if calculated_checksum != header_checksum {
             return Err(IpPacketError::ChecksumMismatch(
-                header_checksum,
                 calculated_checksum,
+                header_checksum,
             ));
         }
 
