@@ -273,35 +273,82 @@ impl TcpPacket {
     pub(crate) fn src_port(&self) -> u16 {
         self.src_port
     }
+
     pub(crate) fn dst_port(&self) -> u16 {
         self.dst_port
     }
+
     pub(crate) fn sequence(&self) -> u32 {
         self.sequence
     }
+
     pub(crate) fn ack_no(&self) -> u32 {
         self.ack_no
     }
+
     pub(crate) fn offset(&self) -> Offset {
         self.offset
     }
+
     pub(crate) fn flags(&self) -> Flags {
         self.flags
     }
+
     pub(crate) fn window_size(&self) -> u16 {
         self.window_size
     }
+
     pub(crate) fn checksum(&self) -> u16 {
         self.checksum
     }
+
     pub(crate) fn urgent_ptr(&self) -> u16 {
         self.urgent_ptr
     }
+
     pub(crate) fn option(&self) -> &[u8] {
         &self.option
     }
+
     pub(crate) fn payload(&self) -> &[u8] {
         &self.payload
+    }
+
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(20 + self.option.len() + self.payload.len());
+        let src_port_array = self.src_port.to_be_bytes();
+        let dst_port_array = self.dst_port.to_be_bytes();
+        let sequence_array = self.sequence.to_be_bytes();
+        let ack_no_array = self.ack_no.to_be_bytes();
+        let window_size_array = self.window_size.to_be_bytes();
+        let checksum_array = self.checksum.to_be_bytes();
+        let urgent_ptr_array = self.urgent_ptr.to_be_bytes();
+
+        v.extend([
+            src_port_array[0],
+            src_port_array[1],
+            dst_port_array[0],
+            dst_port_array[1],
+            sequence_array[0],
+            sequence_array[1],
+            sequence_array[2],
+            sequence_array[3],
+            ack_no_array[0],
+            ack_no_array[1],
+            ack_no_array[2],
+            ack_no_array[3],
+            self.offset.as_u8() << 4,
+            self.flags.as_u8(),
+            window_size_array[0],
+            window_size_array[1],
+            checksum_array[0],
+            checksum_array[1],
+            urgent_ptr_array[0],
+            urgent_ptr_array[1],
+        ]);
+        v.extend(self.option());
+        v.extend(self.payload());
+        v
     }
 }
 
