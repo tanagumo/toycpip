@@ -290,6 +290,10 @@ impl TcpPacket {
         ]);
         vec_to_calc_checksum.extend(option);
         vec_to_calc_checksum.extend(payload);
+
+        if vec_to_calc_checksum.len() % 2 != 0 {
+            vec_to_calc_checksum.push(0);
+        }
         utils::calculate_checksum(&vec_to_calc_checksum, None).unwrap()
     }
 
