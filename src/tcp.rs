@@ -2,11 +2,17 @@ use std::any::type_name;
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::net::Ipv4Addr;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
 
+use log::{debug, error, info, warn};
 use thiserror::Error;
 
-use crate::ip::{IpPacket, Protocol};
+use crate::ip::{self, IpPacket, IpPacketError, Protocol};
 use crate::utils;
+
+pub(crate) static TCP_LAYER: OnceLock<TcpLayer> = OnceLock::new();
 
 #[derive(Debug, Error)]
 pub enum TcpPacketError {
@@ -413,6 +419,15 @@ impl<T> WithSrcIp<T> {
     }
 }
 
+impl WithSrcIp<TcpPacket> {
+    pub(crate) fn to_ip_packet(self, ttl: Option<u8>) -> Result<IpPacket, IpPacketError> {
+        let ttl = ttl.unwrap_or(64);
+        let dst_ip = self.src_ip();
+        let tcp_packet = self.into_value();
+        ip::make_ip_packet(ttl, Protocol::TCP, dst_ip, tcp_packet.to_bytes())
+    }
+}
+
 impl TryFrom<&IpPacket> for WithSrcIp<TcpPacket> {
     type Error = TcpPacketError;
 
@@ -541,4 +556,104 @@ impl TryFrom<&IpPacket> for WithSrcIp<TcpPacket> {
             ),
         })
     }
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum SendError {
+    #[error("failed to send packet")]
+    SendError(#[from] mpsc::SendError<IpPacket>),
+    #[error("failed to create ip packet: {0}")]
+    PacketCreation(#[from] IpPacketError),
+}
+
+#[derive(Debug)]
+pub(crate) struct TcpLayer {
+    sender: Sender<WithSrcIp<TcpPacket>>,
+    observers: Arc<Mutex<Vec<Sender<Arc<WithSrcIp<TcpPacket>>>>>>,
+}
+
+impl TcpLayer {
+    pub(crate) fn start(
+        ip_sender: impl Fn(WithSrcIp<TcpPacket>) -> Result<(), SendError> + Send + 'static,
+        receiver: Receiver<Arc<IpPacket>>,
+    ) -> Self {
+        info!("Starting TCP layer");
+        let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<WithSrcIp<TcpPacket>>>>::new()));
+        let cloned_observers = Arc::clone(&observers);
+
+        thread::Builder::new()
+            .name("tcp_observe_tx".into())
+            .spawn(move || {
+                debug!("TCP receive thread started");
+                loop {
+                    if let Ok(ip_packet) = receiver.recv() {
+                        debug!("Processing IP Packet for TCP packet extraction");
+
+                        if ip_packet.protocol() != Protocol::TCP {
+                            continue;
+                        }
+
+                        let tcp_packet =
+                            match TryInto::<WithSrcIp<TcpPacket>>::try_into(&*ip_packet) {
+                                Ok(tcp_packet) => {
+                                    debug!("TCP packet parsed successfully: {}", tcp_packet);
+                                    tcp_packet
+                                }
+                                Err(e) => {
+                                    warn!("Failed to parse TCP packet: {}", e);
+                                    continue;
+                                }
+                            };
+                        let tcp_packet = Arc::new(tcp_packet);
+                        let mut guard = cloned_observers.lock().unwrap();
+                        guard.retain(|sender| sender.send(Arc::clone(&tcp_packet)).is_ok());
+                    }
+                }
+            })
+            .unwrap();
+
+        let (tx, rx) = mpsc::channel::<WithSrcIp<TcpPacket>>();
+        thread::Builder::new()
+            .name("tcp_send_tx".into())
+            .spawn(move || {
+                debug!("TCP send thread started");
+                for tcp_packet in rx {
+                    debug!("Sending TCP packet: {}", tcp_packet);
+                    match ip_sender(tcp_packet) {
+                        Ok(_) => {
+                            debug!("TCP packet sent successfully");
+                        }
+                        Err(e) => {
+                            error!("Failed to send TCP packet: {}", e);
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
+        Self {
+            sender: tx,
+            observers,
+        }
+    }
+
+    pub(crate) fn add_observer(&self, observer: Sender<Arc<WithSrcIp<TcpPacket>>>) {
+        let mut guard = self.observers.lock().unwrap();
+        guard.push(observer);
+        debug!("Added TCP observer: total_count={}", guard.len());
+    }
+
+    pub(crate) fn send(
+        &self,
+        packet: WithSrcIp<TcpPacket>,
+    ) -> Result<(), mpsc::SendError<WithSrcIp<TcpPacket>>> {
+        self.sender.send(packet)
+    }
+}
+
+pub(crate) fn setup(
+    ip_sender: impl Fn(WithSrcIp<TcpPacket>) -> Result<(), SendError> + Send + 'static,
+    receiver: Receiver<Arc<IpPacket>>,
+) -> &'static TcpLayer {
+    TCP_LAYER.get_or_init(|| TcpLayer::start(ip_sender, receiver))
 }
