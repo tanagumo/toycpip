@@ -14,6 +14,10 @@ pub enum TcpPacketError {
     Malformed(Cow<'static, str>),
     #[error("checksum mismatch: calculated: {0}, actual: {1}")]
     ChecksumMismatch(u16, u16),
+    #[error("offset must be greater than or equal to 5, but got {0}")]
+    OffsetTooSmall(u8),
+    #[error("flags must not be greater than or equal to 0x40, but got {0}")]
+    FlagsTooLarge(u8),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -422,7 +426,11 @@ impl TryFrom<&IpPacket> for WithSrcIp<TcpPacket> {
                 ip_payload.len(),
             ))));
         }
-        let offset = Offset::new(ip_payload[12] >> 4);
+        let offset_value = ip_payload[12] >> 4;
+        if offset_value < 5 {
+            return Err(TcpPacketError::OffsetTooSmall(offset_value));
+        }
+        let offset = Offset::new(offset_value);
         let tcp_option = &ip_payload[20..offset.as_u8() as usize * 4];
         let tcp_payload = &ip_payload[offset.as_u8() as usize * 4..];
 
@@ -433,6 +441,12 @@ impl TryFrom<&IpPacket> for WithSrcIp<TcpPacket> {
         let ip_packet_src_ip_array = ip_packet.src_ip().octets();
         let ip_packet_dst_ip_array = ip_packet.dst_ip().octets();
         let tcp_len_array = (offset.as_u8() as u16 * 4 + tcp_payload.len() as u16).to_be_bytes();
+
+        let flags_value = ip_payload[13] & 0x3f;
+        if flags_value >= 0x40 {
+            return Err(TcpPacketError::FlagsTooLarge(flags_value));
+        }
+        let flags = Flags::new(flags_value);
 
         vec_to_calc_checksum.extend([
             // ip pseudo header
@@ -479,7 +493,7 @@ impl TryFrom<&IpPacket> for WithSrcIp<TcpPacket> {
             u32::from_be_bytes([ip_payload[4], ip_payload[5], ip_payload[6], ip_payload[7]]);
         let ack_no =
             u32::from_be_bytes([ip_payload[8], ip_payload[9], ip_payload[10], ip_payload[11]]);
-        let flags = Flags::new(ip_payload[13] & 0x3f);
+
         let window_size = u16::from_be_bytes([ip_payload[14], ip_payload[15]]);
         let urgent_ptr = u16::from_be_bytes([ip_payload[18], ip_payload[19]]);
 
