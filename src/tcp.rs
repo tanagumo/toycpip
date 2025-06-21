@@ -9,6 +9,7 @@ use std::thread;
 use log::{debug, error, info, warn};
 use thiserror::Error;
 
+use crate::host::HOST_IP;
 use crate::ip::{self, IpPacket, IpPacketError, Protocol};
 use crate::utils;
 
@@ -590,6 +591,10 @@ impl TcpLayer {
                         debug!("Processing IP Packet for TCP packet extraction");
 
                         if ip_packet.protocol() != Protocol::TCP {
+                            continue;
+                        }
+
+                        if ip_packet.dst_ip() != *HOST_IP.get().unwrap() {
                             continue;
                         }
 
