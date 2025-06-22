@@ -104,11 +104,10 @@ pub fn arp_request(
 }
 
 pub fn get_network_interface(name: &str) -> Result<NetworkInterface, InterfaceError> {
-    Ok(datalink::interfaces()
+    datalink::interfaces()
         .into_iter()
-        .filter(|iface: &NetworkInterface| iface.name == name)
-        .next()
-        .ok_or(InterfaceError::InterfaceNotFound)?)
+        .find(|iface: &NetworkInterface| iface.name == name)
+        .ok_or(InterfaceError::InterfaceNotFound)
 }
 
 pub fn send_icmp_request(
