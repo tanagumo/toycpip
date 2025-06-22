@@ -17,7 +17,7 @@ use thiserror;
 
 use crate::ethernet::EthernetLayer;
 use crate::icmp::PingResult;
-use crate::ip::{IpLayer, IpPacket};
+use crate::ip::IpLayer;
 use crate::tcp::{TcpPacket, WithSrcIp};
 use crate::types::MacAddr;
 
