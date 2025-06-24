@@ -1,6 +1,8 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
-use std::thread;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use log::{debug, error, info, warn};
 use thiserror::Error;
@@ -24,6 +26,22 @@ pub(crate) enum SendError {
 pub(crate) struct TcpLayer {
     sender: Sender<WithSrcIp<TcpPacket>>,
     observers: Arc<Mutex<Vec<Sender<Arc<WithSrcIp<TcpPacket>>>>>>,
+    running: Arc<AtomicBool>,
+    observe_thread_handle: Option<JoinHandle<()>>,
+    send_thread_handle: Option<JoinHandle<()>>,
+}
+
+impl Drop for TcpLayer {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+
+        if let Some(observe_thread_handle) = self.observe_thread_handle.take() {
+            observe_thread_handle.join().unwrap();
+        }
+        if let Some(send_thread_handle) = self.send_thread_handle.take() {
+            send_thread_handle.join().unwrap();
+        }
+    }
 }
 
 impl TcpLayer {
@@ -34,13 +52,16 @@ impl TcpLayer {
         info!("Starting TCP layer");
         let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<WithSrcIp<TcpPacket>>>>::new()));
         let cloned_observers = Arc::clone(&observers);
+        let running = Arc::new(AtomicBool::new(true));
+        let r = Arc::clone(&running);
 
-        thread::Builder::new()
+        let observe_thread_handle = thread::Builder::new()
             .name("tcp_observe_tx".into())
             .spawn(move || {
                 debug!("TCP receive thread started");
-                loop {
-                    if let Ok(ip_packet) = receiver.recv() {
+
+                while r.load(Ordering::Relaxed) {
+                    if let Ok(ip_packet) = receiver.recv_timeout(Duration::from_millis(100)) {
                         debug!("Processing IP Packet for TCP packet extraction");
 
                         if ip_packet.protocol() != Protocol::TCP {
@@ -71,18 +92,22 @@ impl TcpLayer {
             .unwrap();
 
         let (tx, rx) = mpsc::channel::<WithSrcIp<TcpPacket>>();
-        thread::Builder::new()
+        let r = Arc::clone(&running);
+        let send_thread_handle = thread::Builder::new()
             .name("tcp_send_tx".into())
             .spawn(move || {
                 debug!("TCP send thread started");
-                for tcp_packet in rx {
-                    debug!("Sending TCP packet: {}", tcp_packet);
-                    match ip_sender(tcp_packet) {
-                        Ok(_) => {
-                            debug!("TCP packet sent successfully");
-                        }
-                        Err(e) => {
-                            error!("Failed to send TCP packet: {}", e);
+
+                while r.load(Ordering::Relaxed) {
+                    if let Ok(tcp_packet) = rx.recv_timeout(Duration::from_millis(100)) {
+                        debug!("Sending TCP packet: {}", tcp_packet);
+                        match ip_sender(tcp_packet) {
+                            Ok(_) => {
+                                debug!("TCP packet sent successfully");
+                            }
+                            Err(e) => {
+                                error!("Failed to send TCP packet: {}", e);
+                            }
                         }
                     }
                 }
@@ -92,6 +117,9 @@ impl TcpLayer {
         Self {
             sender: tx,
             observers,
+            running,
+            observe_thread_handle: Some(observe_thread_handle),
+            send_thread_handle: Some(send_thread_handle),
         }
     }
 

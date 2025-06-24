@@ -3,9 +3,11 @@ use std::{
     fmt::{Debug, Display},
     sync::{
         Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, SendError, Sender},
     },
-    thread,
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use log::{debug, error, info, warn};
@@ -160,6 +162,22 @@ impl EthernetFrame {
 pub(crate) struct EthernetLayer {
     sender: Sender<EthernetFrame>,
     observers: Arc<Mutex<Vec<Sender<Arc<EthernetFrame>>>>>,
+    running: Arc<AtomicBool>,
+    observe_thread_handle: Option<JoinHandle<()>>,
+    send_thread_handle: Option<JoinHandle<()>>,
+}
+
+impl Drop for EthernetLayer {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+
+        if let Some(observe_thread_handle) = self.observe_thread_handle.take() {
+            observe_thread_handle.join().unwrap();
+        }
+        if let Some(send_thread_handle) = self.send_thread_handle.take() {
+            send_thread_handle.join().unwrap();
+        }
+    }
 }
 
 impl EthernetLayer {
@@ -176,12 +194,15 @@ impl EthernetLayer {
         info!("Starting Ethernet layer");
         let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<EthernetFrame>>>::new()));
         let cloned_observers = Arc::clone(&observers);
+        let running = Arc::new(AtomicBool::new(true));
+        let r = Arc::clone(&running);
 
-        thread::Builder::new()
+        let observe_thread_handle = thread::Builder::new()
             .name("ethernet_observe_tx".into())
             .spawn(move || {
                 debug!("Ethernet receive thread started");
-                loop {
+
+                while r.load(Ordering::Relaxed) {
                     if let Ok(raw) = _rx.next() {
                         let frame = match EthernetFrame::try_from(raw) {
                             Ok(frame) => {
@@ -210,32 +231,41 @@ impl EthernetLayer {
             .unwrap();
 
         let (tx, rx) = mpsc::channel::<EthernetFrame>();
-        thread::Builder::new()
+        let r = Arc::clone(&running);
+
+        let send_thread_handle = thread::Builder::new()
             .name("ethernet_send_tx".into())
             .spawn(move || {
                 debug!("Ethernet send thread started");
-                for frame in rx {
-                    debug!("Sending Ethernet frame: {}", frame);
-                    let frame_bytes = frame.to_bytes();
-                    if let Some(ret) = _tx.send_to(&frame_bytes, None) {
-                        match ret {
-                            Ok(_) => {
-                                debug!(
-                                    "Ethernet frame sent successfully: {} bytes",
-                                    frame_bytes.len()
-                                );
-                            }
-                            Err(e) => {
-                                error!("Failed to send Ethernet frame: {}", e);
+
+                while r.load(Ordering::Relaxed) {
+                    if let Ok(frame) = rx.recv_timeout(Duration::from_millis(100)) {
+                        debug!("Sending Ethernet frame: {}", frame);
+                        let frame_bytes = frame.to_bytes();
+                        if let Some(ret) = _tx.send_to(&frame_bytes, None) {
+                            match ret {
+                                Ok(_) => {
+                                    debug!(
+                                        "Ethernet frame sent successfully: {} bytes",
+                                        frame_bytes.len()
+                                    );
+                                }
+                                Err(e) => {
+                                    error!("Failed to send Ethernet frame: {}", e);
+                                }
                             }
                         }
                     }
                 }
             })
             .unwrap();
+
         Self {
             sender: tx,
             observers,
+            running,
+            observe_thread_handle: Some(observe_thread_handle),
+            send_thread_handle: Some(send_thread_handle),
         }
     }
 

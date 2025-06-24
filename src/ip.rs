@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::net::Ipv4Addr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use fastrand;
 use log::{debug, error, info, warn};
@@ -472,6 +474,22 @@ pub(crate) enum SendError {
 pub(crate) struct IpLayer {
     sender: Sender<IpPacket>,
     observers: Arc<Mutex<Vec<Sender<Arc<IpPacket>>>>>,
+    running: Arc<AtomicBool>,
+    observe_thread_handle: Option<JoinHandle<()>>,
+    send_thread_handle: Option<JoinHandle<()>>,
+}
+
+impl Drop for IpLayer {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+
+        if let Some(observe_thread_handle) = self.observe_thread_handle.take() {
+            observe_thread_handle.join().unwrap();
+        }
+        if let Some(send_thread_handle) = self.send_thread_handle.take() {
+            send_thread_handle.join().unwrap();
+        }
+    }
 }
 
 impl IpLayer {
@@ -482,13 +500,16 @@ impl IpLayer {
         info!("Starting IP layer");
         let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<IpPacket>>>::new()));
         let cloned_observers = Arc::clone(&observers);
+        let running = Arc::new(AtomicBool::new(true));
+        let r = Arc::clone(&running);
 
-        thread::Builder::new()
+        let observe_thread_handle = thread::Builder::new()
             .name("ip_observe_tx".into())
             .spawn(move || {
                 debug!("IP receive thread started");
-                loop {
-                    if let Ok(frame) = receiver.recv() {
+
+                while r.load(Ordering::Relaxed) {
+                    if let Ok(frame) = receiver.recv_timeout(Duration::from_millis(100)) {
                         debug!("Processing Ethernet frame for IP packet extraction");
 
                         if frame.ether_type() != EtherType::IpV4 {
@@ -518,24 +539,28 @@ impl IpLayer {
             })
             .unwrap();
 
+        let r = Arc::clone(&running);
         let (tx, rx) = mpsc::channel::<IpPacket>();
-        thread::Builder::new()
+        let send_thread_handle = thread::Builder::new()
             .name("ip_send_tx".into())
             .spawn(move || {
                 debug!("IP send thread started");
-                for packet in rx {
-                    debug!(
-                        "Sending IP packet: src={}, dst={}, protocol={}",
-                        packet.src_ip(),
-                        packet.dst_ip(),
-                        packet.protocol()
-                    );
-                    match ethernet_sender(packet) {
-                        Ok(_) => {
-                            debug!("IP packet sent successfully");
-                        }
-                        Err(e) => {
-                            error!("Failed to send IP packet: {}", e);
+
+                while r.load(Ordering::Relaxed) {
+                    if let Ok(packet) = rx.recv_timeout(Duration::from_millis(100)) {
+                        debug!(
+                            "Sending IP packet: src={}, dst={}, protocol={}",
+                            packet.src_ip(),
+                            packet.dst_ip(),
+                            packet.protocol()
+                        );
+                        match ethernet_sender(packet) {
+                            Ok(_) => {
+                                debug!("IP packet sent successfully");
+                            }
+                            Err(e) => {
+                                error!("Failed to send IP packet: {}", e);
+                            }
                         }
                     }
                 }
@@ -545,6 +570,9 @@ impl IpLayer {
         Self {
             sender: tx,
             observers,
+            running,
+            observe_thread_handle: Some(observe_thread_handle),
+            send_thread_handle: Some(send_thread_handle),
         }
     }
 
