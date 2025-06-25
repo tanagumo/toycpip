@@ -381,12 +381,12 @@ impl TcpPacket {
 }
 
 #[derive(Debug)]
-pub(crate) struct WithSrcIp<T> {
-    src_ip: Ipv4Addr,
+pub(crate) struct WithPeerIp<T> {
+    ip_addr: Ipv4Addr,
     value: T,
 }
 
-impl<T> Display for WithSrcIp<T>
+impl<T> Display for WithPeerIp<T>
 where
     T: Display,
 {
@@ -394,15 +394,15 @@ where
         let type_name = type_name::<T>().split("::").last().unwrap_or("Unknown");
         write!(
             f,
-            "WithSrcIp<{}>(src_ip={}, value={})",
-            type_name, self.src_ip, self.value
+            "WithPeerIP<{}>(ip_addr={}, value={})",
+            type_name, self.ip_addr, self.value
         )
     }
 }
 
-impl<T> WithSrcIp<T> {
-    pub(crate) fn src_ip(&self) -> Ipv4Addr {
-        self.src_ip
+impl<T> WithPeerIp<T> {
+    pub(crate) fn ip_addr(&self) -> Ipv4Addr {
+        self.ip_addr
     }
 
     pub(crate) fn value(&self) -> &T {
@@ -414,16 +414,16 @@ impl<T> WithSrcIp<T> {
     }
 }
 
-impl WithSrcIp<TcpPacket> {
+impl WithPeerIp<TcpPacket> {
     pub(crate) fn to_ip_packet(self, ttl: Option<u8>) -> Result<IpPacket, IpPacketError> {
         let ttl = ttl.unwrap_or(64);
-        let dst_ip = self.src_ip();
+        let dst_ip = self.ip_addr();
         let tcp_packet = self.into_value();
         ip::make_ip_packet(ttl, Protocol::TCP, dst_ip, tcp_packet.to_bytes())
     }
 }
 
-impl TryFrom<&IpPacket> for WithSrcIp<TcpPacket> {
+impl TryFrom<&IpPacket> for WithPeerIp<TcpPacket> {
     type Error = TcpPacketError;
 
     fn try_from(ip_packet: &IpPacket) -> Result<Self, Self::Error> {
@@ -535,7 +535,7 @@ impl TryFrom<&IpPacket> for WithSrcIp<TcpPacket> {
         }
 
         Ok(Self {
-            src_ip: ip_packet.src_ip(),
+            ip_addr: ip_packet.src_ip(),
             value: TcpPacket::new(
                 src_port,
                 dst_port,

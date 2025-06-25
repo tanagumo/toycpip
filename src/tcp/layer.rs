@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::host::HOST_IP;
 use crate::ip::{IpPacket, IpPacketError, Protocol};
 
-use super::packet::{TcpPacket, WithSrcIp};
+use super::packet::{TcpPacket, WithPeerIp};
 
 pub(crate) static TCP_LAYER: OnceLock<TcpLayer> = OnceLock::new();
 
@@ -24,8 +24,8 @@ pub(crate) enum SendError {
 
 #[derive(Debug)]
 pub(crate) struct TcpLayer {
-    sender: Sender<WithSrcIp<TcpPacket>>,
-    observers: Arc<Mutex<Vec<Sender<Arc<WithSrcIp<TcpPacket>>>>>>,
+    sender: Sender<WithPeerIp<TcpPacket>>,
+    observers: Arc<Mutex<Vec<Sender<Arc<WithPeerIp<TcpPacket>>>>>>,
     running: Arc<AtomicBool>,
     observe_thread_handle: Option<JoinHandle<()>>,
     send_thread_handle: Option<JoinHandle<()>>,
@@ -46,11 +46,11 @@ impl Drop for TcpLayer {
 
 impl TcpLayer {
     pub(crate) fn start(
-        ip_sender: impl Fn(WithSrcIp<TcpPacket>) -> Result<(), SendError> + Send + 'static,
+        ip_sender: impl Fn(WithPeerIp<TcpPacket>) -> Result<(), SendError> + Send + 'static,
         receiver: Receiver<Arc<IpPacket>>,
     ) -> Self {
         info!("Starting TCP layer");
-        let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<WithSrcIp<TcpPacket>>>>::new()));
+        let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<WithPeerIp<TcpPacket>>>>::new()));
         let cloned_observers = Arc::clone(&observers);
         let running = Arc::new(AtomicBool::new(true));
         let r = Arc::clone(&running);
@@ -73,7 +73,7 @@ impl TcpLayer {
                         }
 
                         let tcp_packet =
-                            match TryInto::<WithSrcIp<TcpPacket>>::try_into(&*ip_packet) {
+                            match TryInto::<WithPeerIp<TcpPacket>>::try_into(&*ip_packet) {
                                 Ok(tcp_packet) => {
                                     debug!("TCP packet parsed successfully: {}", tcp_packet);
                                     tcp_packet
@@ -91,7 +91,7 @@ impl TcpLayer {
             })
             .unwrap();
 
-        let (tx, rx) = mpsc::channel::<WithSrcIp<TcpPacket>>();
+        let (tx, rx) = mpsc::channel::<WithPeerIp<TcpPacket>>();
         let r = Arc::clone(&running);
         let send_thread_handle = thread::Builder::new()
             .name("tcp_send_tx".into())
@@ -123,7 +123,7 @@ impl TcpLayer {
         }
     }
 
-    pub(crate) fn add_observer(&self, observer: Sender<Arc<WithSrcIp<TcpPacket>>>) {
+    pub(crate) fn add_observer(&self, observer: Sender<Arc<WithPeerIp<TcpPacket>>>) {
         let mut guard = self.observers.lock().unwrap();
         guard.push(observer);
         debug!("Added TCP observer: total_count={}", guard.len());
@@ -131,8 +131,8 @@ impl TcpLayer {
 
     pub(crate) fn send(
         &self,
-        packet: WithSrcIp<TcpPacket>,
-    ) -> Result<(), mpsc::SendError<WithSrcIp<TcpPacket>>> {
+        packet: WithPeerIp<TcpPacket>,
+    ) -> Result<(), mpsc::SendError<WithPeerIp<TcpPacket>>> {
         self.sender.send(packet)
     }
 }

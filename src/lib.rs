@@ -18,7 +18,7 @@ use thiserror;
 use crate::ethernet::EthernetLayer;
 use crate::icmp::PingResult;
 use crate::ip::IpLayer;
-use crate::tcp::{TcpPacket, WithSrcIp};
+use crate::tcp::{TcpPacket, WithPeerIp};
 use crate::types::MacAddr;
 
 #[derive(Debug, thiserror::Error)]
@@ -68,8 +68,8 @@ fn make_ethernet_sender(
 
 fn make_ip_sender(
     ip_layer: &'static IpLayer,
-) -> impl Fn(WithSrcIp<TcpPacket>) -> Result<(), tcp::SendError> {
-    |tcp_packet: WithSrcIp<TcpPacket>| {
+) -> impl Fn(WithPeerIp<TcpPacket>) -> Result<(), tcp::SendError> {
+    |tcp_packet: WithPeerIp<TcpPacket>| {
         let ip_packet = tcp_packet.to_ip_packet(Some(64))?;
         ip_layer.send(ip_packet)?;
         Ok(())
