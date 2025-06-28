@@ -28,7 +28,7 @@ impl Offset {
     /// Offset instances are only created from TcpPacket with the assumption that
     /// constraint violations for Offset, specifically cases where the value is less than 5,
     /// are considered program bugs and will cause a panic
-    fn new(value: u8) -> Self {
+    pub(crate) fn new(value: u8) -> Self {
         if value < 5 {
             panic!(
                 "the value of `offset` must be greater than or equal to 0x05, but got 0x{:02x}",
@@ -53,7 +53,7 @@ impl Offset {
 pub(crate) struct Flags(u8);
 
 impl Flags {
-    fn new(value: u8) -> Self {
+    pub(crate) fn new(value: u8) -> Self {
         if value >= 0x40 {
             panic!(
                 "The value of `flags` must be smaller than 0x40, but got 0x{:02x}",
@@ -167,7 +167,7 @@ impl Display for TcpPacket {
 }
 
 impl TcpPacket {
-    fn new(
+    pub(crate) fn new(
         src_port: u16,
         dst_port: u16,
         sequence: u32,
@@ -401,6 +401,10 @@ where
 }
 
 impl<T> WithPeerIp<T> {
+    pub(crate) fn new(ip_addr: Ipv4Addr, value: T) -> Self {
+        Self { ip_addr, value }
+    }
+
     pub(crate) fn ip_addr(&self) -> Ipv4Addr {
         self.ip_addr
     }
