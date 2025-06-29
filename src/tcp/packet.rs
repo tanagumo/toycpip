@@ -2,6 +2,7 @@ use std::any::type_name;
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::net::Ipv4Addr;
+use std::ops::BitOr;
 
 use log::error;
 use thiserror::Error;
@@ -49,6 +50,16 @@ impl Offset {
     fn as_u8(&self) -> u8 {
         self.0
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum Flag {
+    FIN,
+    SYN,
+    RST,
+    PSH,
+    ACK,
+    URG,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -115,6 +126,26 @@ impl Flags {
 
     fn urg_flag(&self) -> u8 {
         (self.0 >> 5) & 0x01
+    }
+}
+
+impl BitOr<Flag> for Flags {
+    type Output = Self;
+    fn bitor(self, rhs: Flag) -> Self::Output {
+        match rhs {
+            Flag::FIN => Flags::new(self.0 | 0b000001),
+            Flag::SYN => Flags::new(self.0 | 0b000010),
+            Flag::RST => Flags::new(self.0 | 0b000100),
+            Flag::PSH => Flags::new(self.0 | 0b001000),
+            Flag::ACK => Flags::new(self.0 | 0b010000),
+            Flag::URG => Flags::new(self.0 | 0b100000),
+        }
+    }
+}
+
+impl From<Flag> for Flags {
+    fn from(value: Flag) -> Self {
+        Flags::new(0) | value
     }
 }
 
