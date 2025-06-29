@@ -15,7 +15,8 @@ use std::{
 use pnet::datalink::{self, NetworkInterface};
 use thiserror;
 
-use crate::ethernet::EthernetLayer;
+use crate::arp::ArpPacket;
+use crate::ethernet::{EthernetFrame, EthernetLayer, WithDstMacAddr};
 use crate::icmp::PingResult;
 use crate::ip::IpLayer;
 use crate::tcp::{TcpPacket, WithPeerIp};
@@ -56,11 +57,21 @@ fn extract_interface_info_detailed(
     Ok((mac_addr, ipv4_addr, netmask))
 }
 
-fn make_ethernet_sender(
+fn make_ethernet_sender_for_ip(
     ethernet_layer: &'static EthernetLayer,
 ) -> impl Fn(ip::IpPacket) -> Result<(), ip::SendError> {
     |ip_packet: ip::IpPacket| {
         let frame = ip::make_ethernet_frame(&ip_packet)?;
+        ethernet_layer.send(frame)?;
+        Ok(())
+    }
+}
+
+fn make_ethernet_sender_for_arp(
+    ethernet_layer: &'static EthernetLayer,
+) -> impl Fn(WithDstMacAddr<ArpPacket>) -> Result<(), mpsc::SendError<EthernetFrame>> {
+    |arp_packet: WithDstMacAddr<ArpPacket>| {
+        let frame = arp::make_ethernet_frame(&arp_packet);
         ethernet_layer.send(frame)?;
         Ok(())
     }
@@ -87,7 +98,11 @@ pub fn setup(
 
     let (tx, rx) = mpsc::channel();
     ethernet_layer.add_observer(tx);
-    let ip_layer = ip::setup(make_ethernet_sender(ethernet_layer), rx);
+    let ip_layer = ip::setup(make_ethernet_sender_for_ip(ethernet_layer), rx);
+
+    let (tx, rx) = mpsc::channel();
+    ethernet_layer.add_observer(tx);
+    arp::setup(make_ethernet_sender_for_arp(ethernet_layer), rx);
 
     let (tx, rx) = mpsc::channel();
     ip_layer.add_observer(tx);

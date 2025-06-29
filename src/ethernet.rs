@@ -118,6 +118,30 @@ impl TryFrom<&[u8]> for EthernetFrame {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct WithDstMacAddr<T> {
+    dst_mac: MacAddr,
+    value: T,
+}
+
+impl<T> WithDstMacAddr<T> {
+    pub(crate) fn new(dst_mac: MacAddr, value: T) -> Self {
+        Self { dst_mac, value }
+    }
+
+    pub(crate) fn dst_mac(&self) -> MacAddr {
+        self.dst_mac
+    }
+
+    pub(crate) fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub(crate) fn into_value(self) -> T {
+        self.value
+    }
+}
+
 impl EthernetFrame {
     fn new(dst_mac: MacAddr, src_mac: MacAddr, ether_type: EtherType, payload: Vec<u8>) -> Self {
         Self {

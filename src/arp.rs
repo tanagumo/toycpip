@@ -1,13 +1,19 @@
 use std::borrow::Cow;
-use std::sync::mpsc::{self, SendError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use std::{fmt::Display, net::Ipv4Addr};
 
+use log::{debug, error, info, warn};
 use thiserror::Error;
 
-use crate::ethernet::{self, ETHERNET_LAYER, EtherType, EthernetFrame};
+use crate::ethernet::{self, EtherType, EthernetFrame, WithDstMacAddr};
 use crate::host::{self, HOST_IP, HOST_MAC};
 use crate::types::MacAddr;
+
+pub(crate) static ARP_LAYER: OnceLock<ArpLayer> = OnceLock::new();
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -99,6 +105,24 @@ pub(crate) struct ArpPacket {
     sender_ip: Ipv4Addr,
     target_mac: MacAddr,
     target_ip: Ipv4Addr,
+}
+
+impl Display for ArpPacket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ArpPacket(hardware_type={}, protocol_type={}, hardware_size={}, protocol_size={}, op_code={}, sender_mac={}, sender_ip={}, target_mac={}, target_ip={})",
+            self.hardware_type,
+            self.protocol_type,
+            self.hardware_size,
+            self.protocol_size,
+            self.op_code,
+            self.sender_mac,
+            self.sender_ip,
+            self.target_mac,
+            self.target_ip
+        )
+    }
 }
 
 impl ArpPacket {
@@ -302,7 +326,7 @@ pub(crate) enum ArpRequestError {
     #[error("timeout: {0} seconds")]
     Timeout(u8),
     #[error("send error: {0}")]
-    SendError(#[from] SendError<EthernetFrame>),
+    SendError(#[from] mpsc::SendError<ArpPacket>),
     #[error("target_ip is not in the local network address")]
     NotLocalAddress,
 }
@@ -318,6 +342,10 @@ pub(crate) fn arp_request(
     let host_mac = *HOST_MAC.get().unwrap();
     let host_ip = *HOST_IP.get().unwrap();
 
+    if target_ip == host_ip {
+        return Ok(host_mac);
+    }
+
     let arp_packet = ArpPacket::new(
         0x0001,
         0x0800,
@@ -330,17 +358,11 @@ pub(crate) fn arp_request(
         target_ip,
     );
 
-    let frame = ethernet::make_frame(
-        MacAddr::new([0xff; 6]),
-        EtherType::Arp,
-        arp_packet.to_bytes(),
-    );
-
     let (tx, rx) = mpsc::channel();
 
-    let layer = ETHERNET_LAYER.get().unwrap();
+    let layer = ARP_LAYER.get().unwrap();
     layer.add_observer(tx);
-    layer.send(frame)?;
+    layer.send(arp_packet)?;
 
     let start = Instant::now();
     let result = loop {
@@ -351,11 +373,9 @@ pub(crate) fn arp_request(
         }
 
         match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(frame) => {
-                if let Ok(packet) = TryInto::<ArpPacket>::try_into(&*frame) {
-                    if packet.op_code() == &OpCode::Response && packet.sender_ip == target_ip {
-                        return Ok(packet.sender_mac);
-                    }
+            Ok(packet) => {
+                if packet.op_code() == &OpCode::Response && packet.sender_ip == target_ip {
+                    return Ok(packet.sender_mac);
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -364,4 +384,152 @@ pub(crate) fn arp_request(
     };
 
     result
+}
+
+#[derive(Debug)]
+pub(crate) struct ArpLayer {
+    sender: Sender<ArpPacket>,
+    observers: Arc<Mutex<Vec<Sender<Arc<ArpPacket>>>>>,
+    running: Arc<AtomicBool>,
+    receive_thread_handle: Option<JoinHandle<()>>,
+    send_thread_handle: Option<JoinHandle<()>>,
+}
+
+impl Drop for ArpLayer {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+
+        if let Some(receive_thread_handle) = self.receive_thread_handle.take() {
+            receive_thread_handle.join().unwrap();
+        }
+        if let Some(send_thread_handle) = self.send_thread_handle.take() {
+            send_thread_handle.join().unwrap();
+        }
+    }
+}
+
+impl ArpLayer {
+    pub(crate) fn start(
+        ethernet_sender: impl Fn(
+            WithDstMacAddr<ArpPacket>,
+        ) -> Result<(), mpsc::SendError<EthernetFrame>>
+        + Send
+        + 'static,
+        receiver: Receiver<Arc<EthernetFrame>>,
+    ) -> Self {
+        info!("Starting ARP layer");
+        let observers = Arc::new(Mutex::new(Vec::<Sender<Arc<ArpPacket>>>::new()));
+        let cloned_observers = Arc::clone(&observers);
+        let running = Arc::new(AtomicBool::new(true));
+        let r = Arc::clone(&running);
+
+        let receive_thread_handle = thread::Builder::new()
+            .name("arp_receive_tx".into())
+            .spawn(move || {
+                debug!("ARP receive thread started");
+
+                while r.load(Ordering::Relaxed) {
+                    if let Ok(frame) = receiver.recv_timeout(Duration::from_millis(100)) {
+                        debug!("Processing Ethernet frame for ARP packet extraction");
+
+                        if frame.ether_type() != EtherType::Arp {
+                            continue;
+                        }
+
+                        let packet = match ArpPacket::try_from(&*frame) {
+                            Ok(packet) => {
+                                debug!("ARP packet parsed successfully: {}", packet);
+                                packet
+                            }
+                            Err(e) => {
+                                warn!("Failed to parse ARP packet: {}", e);
+                                continue;
+                            }
+                        };
+
+                        if *packet.op_code() == OpCode::Request {
+                            continue;
+                        }
+
+                        let packet = Arc::new(packet);
+                        let mut guard = cloned_observers.lock().unwrap();
+                        guard.retain(|sender| sender.send(Arc::clone(&packet)).is_ok());
+
+                        if packet.target_ip() == HOST_IP.get().unwrap() {
+                            let reply = ArpPacket::new(
+                                0x0001,
+                                0x0800,
+                                0x06,
+                                0x04,
+                                OpCode::Response,
+                                *HOST_MAC.get().unwrap(),
+                                *HOST_IP.get().unwrap(),
+                                *packet.sender_mac(),
+                                *packet.sender_ip(),
+                            );
+
+                            if let Err(e) = ARP_LAYER.get().unwrap().send(reply) {
+                                warn!("Failed to ARP reply: {}", e);
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
+        let r = Arc::clone(&running);
+        let (tx, rx) = mpsc::channel::<ArpPacket>();
+        let send_thread_handle = thread::Builder::new()
+            .name("arp_send_tx".into())
+            .spawn(move || {
+                debug!("ARP send thread started");
+
+                while r.load(Ordering::Relaxed) {
+                    if let Ok(packet) = rx.recv_timeout(Duration::from_millis(100)) {
+                        debug!("Sending ARP packet: {}", packet);
+                        match ethernet_sender(WithDstMacAddr::new([0xff; 6].into(), packet)) {
+                            Ok(_) => {
+                                debug!("ARP packet sent successfully");
+                            }
+                            Err(e) => {
+                                error!("Failed to send ARP packet: {}", e);
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
+        Self {
+            sender: tx,
+            observers,
+            running,
+            receive_thread_handle: Some(receive_thread_handle),
+            send_thread_handle: Some(send_thread_handle),
+        }
+    }
+
+    pub(crate) fn add_observer(&self, observer: Sender<Arc<ArpPacket>>) {
+        let mut guard = self.observers.lock().unwrap();
+        guard.push(observer);
+        debug!("Added ARP observer: total_count={}", guard.len());
+    }
+
+    pub(crate) fn send(&self, packet: ArpPacket) -> Result<(), mpsc::SendError<ArpPacket>> {
+        self.sender.send(packet)
+    }
+}
+
+pub(crate) fn make_ethernet_frame(arp_packet: &WithDstMacAddr<ArpPacket>) -> EthernetFrame {
+    let dst_mac = arp_packet.dst_mac();
+    ethernet::make_frame(dst_mac, EtherType::Arp, arp_packet.value().to_bytes())
+}
+
+pub(crate) fn setup(
+    ethernet_sender: impl Fn(WithDstMacAddr<ArpPacket>) -> Result<(), mpsc::SendError<EthernetFrame>>
+    + Send
+    + 'static,
+    receiver: Receiver<Arc<EthernetFrame>>,
+) -> &'static ArpLayer {
+    ARP_LAYER.get_or_init(|| ArpLayer::start(ethernet_sender, receiver))
 }

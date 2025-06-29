@@ -463,6 +463,7 @@ impl TryFrom<&EthernetFrame> for IpPacket {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub(crate) enum SendError {
     #[error("failed to send packet")]
     SendError(#[from] mpsc::SendError<EthernetFrame>),
