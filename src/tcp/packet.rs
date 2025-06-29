@@ -19,6 +19,8 @@ pub enum TcpPacketError {
     OffsetTooSmall(u8),
     #[error("flags must not be greater than or equal to 0x40, but got {0}")]
     FlagsTooLarge(u8),
+    #[error("malformed option: {0}")]
+    MalformedOption(Cow<'static, str>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -195,7 +197,7 @@ impl TcpPacket {
         }
     }
 
-    fn calc_checksum(
+    pub(crate) fn calc_checksum(
         src_ip: Ipv4Addr,
         dst_ip: Ipv4Addr,
         protocol: Protocol,
@@ -377,6 +379,128 @@ impl TcpPacket {
         v.extend(self.option());
         v.extend(self.payload());
         v
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct TcpPacketBuilder {}
+
+impl TcpPacketBuilder {
+    pub(crate) fn new(
+        src_ip: Ipv4Addr,
+        src_port: u16,
+        dst_ip: Ipv4Addr,
+        dst_port: u16,
+    ) -> TcpPacketBuilderImpl {
+        TcpPacketBuilderImpl {
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port,
+            sequence: 0,
+            ack_no: 0,
+            flags: Flags::new(0),
+            window_size: 8192,
+            urgent_ptr: 0,
+            option: vec![],
+            payload: vec![],
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct TcpPacketBuilderImpl {
+    src_ip: Ipv4Addr,
+    src_port: u16,
+    dst_ip: Ipv4Addr,
+    dst_port: u16,
+    sequence: u32,
+    ack_no: u32,
+    flags: Flags,
+    window_size: u16,
+    urgent_ptr: u16,
+    option: Vec<u8>,
+    payload: Vec<u8>,
+}
+
+impl TcpPacketBuilderImpl {
+    pub(crate) fn sequence(self, sequence: u32) -> Self {
+        Self { sequence, ..self }
+    }
+
+    pub(crate) fn ack_no(self, ack_no: u32) -> Self {
+        Self { ack_no, ..self }
+    }
+
+    pub(crate) fn flags(self, flags: Flags) -> Self {
+        Self { flags, ..self }
+    }
+
+    pub(crate) fn window_size(self, window_size: u16) -> Self {
+        Self {
+            window_size,
+            ..self
+        }
+    }
+
+    pub(crate) fn urgent_ptr(self, urgent_ptr: u16) -> Self {
+        Self { urgent_ptr, ..self }
+    }
+
+    pub(crate) fn option(self, option: Vec<u8>) -> Self {
+        Self { option, ..self }
+    }
+
+    pub(crate) fn payload(self, payload: Vec<u8>) -> Self {
+        Self { payload, ..self }
+    }
+
+    pub(crate) fn build(self) -> Result<TcpPacket, TcpPacketError> {
+        if self.option.len() % 4 != 0 {
+            return Err(TcpPacketError::MalformedOption(Cow::Owned(format!(
+                "the length of `option` must be multiple of 4, but got {}",
+                self.option.len()
+            ))));
+        }
+
+        let header_len = self.option.len() + 20;
+        if header_len > 60 {
+            return Err(TcpPacketError::MalformedOption(Cow::Owned(format!(
+                "TCP header length exceeds maximum (60 bytes), got {}",
+                header_len
+            ))));
+        }
+
+        let offset = (self.option.len() as u8 + 20) / 4;
+        let checksum = TcpPacket::calc_checksum(
+            self.src_ip,
+            self.dst_ip,
+            Protocol::TCP,
+            self.src_port,
+            self.dst_port,
+            self.sequence,
+            self.ack_no,
+            Offset::new(offset),
+            self.flags,
+            self.window_size,
+            self.urgent_ptr,
+            &self.option,
+            &self.payload,
+        );
+
+        Ok(TcpPacket::new(
+            self.src_port,
+            self.dst_port,
+            self.sequence,
+            self.ack_no,
+            Offset::new(offset),
+            self.flags,
+            self.window_size,
+            checksum,
+            self.urgent_ptr,
+            self.option,
+            self.payload,
+        ))
     }
 }
 
