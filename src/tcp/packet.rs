@@ -452,58 +452,11 @@ impl TryFrom<&IpPacket> for WithPeerIp<TcpPacket> {
         let tcp_option = &ip_payload[20..offset.as_u8() as usize * 4];
         let tcp_payload = &ip_payload[offset.as_u8() as usize * 4..];
 
-        // `32` is [the length of the ip pseudo header] + [the length of the tcp header]
-        let mut vec_to_calc_checksum =
-            Vec::with_capacity(32 + tcp_option.len() + tcp_payload.len());
-
-        let ip_packet_src_ip_array = ip_packet.src_ip().octets();
-        let ip_packet_dst_ip_array = ip_packet.dst_ip().octets();
-        let tcp_len_array = (offset.as_u8() as u16 * 4 + tcp_payload.len() as u16).to_be_bytes();
-
         let flags_value = ip_payload[13] & 0x3f;
         if flags_value >= 0x40 {
             return Err(TcpPacketError::FlagsTooLarge(flags_value));
         }
         let flags = Flags::new(flags_value);
-
-        vec_to_calc_checksum.extend([
-            // ip pseudo header
-            ip_packet_src_ip_array[0],
-            ip_packet_src_ip_array[1],
-            ip_packet_src_ip_array[2],
-            ip_packet_src_ip_array[3],
-            ip_packet_dst_ip_array[0],
-            ip_packet_dst_ip_array[1],
-            ip_packet_dst_ip_array[2],
-            ip_packet_dst_ip_array[3],
-            0,
-            ip_packet.protocol().into(),
-            tcp_len_array[0],
-            tcp_len_array[1],
-            // tcp_header
-            ip_payload[0],
-            ip_payload[1],
-            ip_payload[2],
-            ip_payload[3],
-            ip_payload[4],
-            ip_payload[5],
-            ip_payload[6],
-            ip_payload[7],
-            ip_payload[8],
-            ip_payload[9],
-            ip_payload[10],
-            ip_payload[11],
-            ip_payload[12],
-            ip_payload[13],
-            ip_payload[14],
-            ip_payload[15],
-            0,
-            0,
-            ip_payload[18],
-            ip_payload[19],
-        ]);
-        vec_to_calc_checksum.extend(tcp_option);
-        vec_to_calc_checksum.extend(tcp_payload);
 
         let src_port = u16::from_be_bytes([ip_payload[0], ip_payload[1]]);
         let dst_port = u16::from_be_bytes([ip_payload[2], ip_payload[3]]);
