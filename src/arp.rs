@@ -141,7 +141,7 @@ impl ArpPacket {
             panic!("`target_ip` must be local network address");
         }
 
-        if target_mac != MacAddr::zero() {
+        if op_code == OpCode::Request && target_mac != MacAddr::zero() {
             panic!("`target_mac` must be zero");
         }
 
